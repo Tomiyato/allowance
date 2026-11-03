@@ -1,0 +1,56 @@
+# Render Blueprint: one free Node web service (API + built React frontend).
+# Spec: https://render.com/docs/blueprint-spec  (JSON schema: https://render.com/schema/render.yaml.json)
+# Secrets use `sync: false`: Render asks for them once, when the Blueprint is first created.
+services:
+  - type: web
+    name: allowance
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+
+      # --- AI ---
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: AI_PROVIDER
+        value: google
+      - key: AI_MODEL
+        value: gemini-3.6-flash
+      # Groq fallback (used automatically when Gemini is rate-limited or overloaded).
+      - key: GROQ_API_KEY
+        sync: false
+
+      # --- PayPal (sandbox) ---
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_ENV
+        value: sandbox
+      # authorization = plan A (one hold, partial captures). Falls back to mock if the PayPal keys are missing.
+      # TODO(paypal): switch to per_purchase if the sandbox spike shows multiple partial captures do not work.
+      - key: PAYMENT_MODE
+        value: authorization
+
+      # --- Products ---
+      - key: CHANNEL3_API_KEY
+        sync: false
+      - key: PRODUCT_SOURCE
+        value: channel3
+      - key: DEMO_INJECTION
+        value: "1"
+
+      # --- Server ---
+      # Optional. Leave empty to derive PayPal return URLs from the request (Render forwards https).
+      - key: PUBLIC_URL
+        sync: false
+      # PORT is set by Render. STORE_FILE keeps its default (.data/store.json); the free tier has no
+      # persistent disk, so sessions reset on every restart or spin-down.
