@@ -4,7 +4,7 @@
 
 Allowance is an AI shopping agent that buys real products on its own, but only inside a spending mandate the person approved once with PayPal. The LLM never decides whether money moves: a deterministic policy engine and the PayPal payment rail do. Every action (search, proposal, policy decision, capture, refund, block) lands in an AG Grid ledger.
 
-- **Hosted demo:** https://allowance.onrender.com (TODO(deploy): confirm the URL after the first Render deploy)
+- **Hosted demo:** https://allowance-cpp0.onrender.com (free tier: the first load after idle can take ~1 minute)
 - **Demo video (< 3 min):** TODO(video): YouTube link
 - **Judges:** a 2-minute guided test path is in [docs/JUDGES.md](docs/JUDGES.md).
 
@@ -179,7 +179,7 @@ Frontend hot reload (optional): run the server, then `npm --prefix web run dev` 
 | `CHANNEL3_API_KEY` | (none) | Channel3 search key. Secret. |
 | `PRODUCT_SOURCE` | `channel3` with key, otherwise `catalog` | `channel3` or `catalog`. Channel3 errors fall back to the catalog. |
 | `DEMO_INJECTION` | off | `1` mixes the prompt-injection listing into garden and gift results. |
-| `PUBLIC_URL` | (taken from the request) | Public base URL for PayPal return links, e.g. `https://allowance.onrender.com`. |
+| `PUBLIC_URL` | (taken from the request) | Public base URL for PayPal return links, e.g. `https://allowance-cpp0.onrender.com`. |
 | `PORT` | `3000` | HTTP port. Render sets it. |
 | `STORE_FILE` | `.data/store.json` | Best-effort JSON persistence of sessions. |
 | `NODE_ENV` | (none) | `production` turns on `Secure` session cookies. |

@@ -1,6 +1,6 @@
 # Allowance: 2-minute test path for judges
 
-**Hosted demo:** https://allowance.onrender.com (TODO(deploy): confirm the URL after the first Render deploy)
+**Hosted demo:** https://allowance-cpp0.onrender.com (free tier: the first load after idle can take ~1 minute)
 
 **Sandbox buyer:** `TODO(paypal)` / `TODO(paypal)`. This is a PayPal sandbox test account, so no real money moves.
 
