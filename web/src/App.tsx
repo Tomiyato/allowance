@@ -109,7 +109,7 @@ function Footer() {
           ) : (
             <span>
               Payments: {payment} · Products: {mode ? (mode.products === "channel3" ? "Channel3" : "Demo catalog") : "…"} · AI:{" "}
-              {mode ? prettyAi(mode.ai) : "…"}
+              {mode ? prettyAi(mode.ai, mode.ai_active) : "…"}
             </span>
           )}
         </span>
@@ -118,11 +118,26 @@ function Footer() {
   );
 }
 
-function prettyAi(ai: string): string {
-  const model = ai.includes(":") ? ai.slice(ai.indexOf(":") + 1) : ai;
-  if (/gemini|google/i.test(ai)) return `Gemini (${model})`;
-  if (/groq/i.test(ai)) return `Groq (${model})`;
-  return ai;
+function splitAi(ai: string): { provider: string; model: string } {
+  const i = ai.indexOf(":");
+  const provider = i >= 0 ? ai.slice(0, i) : /gemini/i.test(ai) ? "google" : "";
+  const model = i >= 0 ? ai.slice(i + 1) : ai;
+  return { provider, model: model.slice(model.lastIndexOf("/") + 1) };
+}
+
+/** "Gemini · model" / "Groq fallback · model" for the model that answered last; the configured one before the first turn. */
+function prettyAi(ai: string, active: string | null): string {
+  if (!active) {
+    const { provider, model } = splitAi(ai);
+    if (/google|gemini/i.test(provider || ai)) return `Gemini (${model})`;
+    if (/groq/i.test(provider || ai)) return `Groq (${model})`;
+    return ai;
+  }
+  const a = splitAi(active);
+  const isGroq = /groq/i.test(a.provider);
+  const label = /google|gemini/i.test(a.provider) ? "Gemini" : isGroq ? "Groq" : a.provider || "AI";
+  const fellBack = a.provider !== splitAi(ai).provider || (isGroq && active !== ai);
+  return `${isGroq && fellBack ? `${label} fallback` : label} · ${a.model}`;
 }
 
 function Toasts() {

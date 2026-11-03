@@ -1,7 +1,7 @@
 // POST /api/chat: AI SDK v7 UI message stream consumed by @ai-sdk/react useChat.
 import type { Request, Response } from "express";
 import { convertToModelMessages, isStepCount, streamText, type UIMessage } from "ai";
-import { addLedger, refreshMandateStatus, remaining, type Session } from "../store.ts";
+import { addLedger, refreshMandateStatus, remaining, touch, type Session } from "../store.ts";
 import { isRateLimit, model, RATE_LIMIT_MESSAGE } from "./model.ts";
 import { agentInstructions } from "./prompt.ts";
 import { buildTools } from "./tools.ts";
@@ -50,7 +50,11 @@ export async function handleChat(req: Request, res: Response, session: Session, 
   }
 
   const result = streamText({
-    model: model(),
+    model: model((label) => {
+      // Every model call of the turn reports in; the last one is the provider that produced the final step.
+      session.ai_active = label;
+      touch(session);
+    }),
     instructions: agentInstructions(session.mandate, remaining(session)),
     messages: modelMessages,
     tools,

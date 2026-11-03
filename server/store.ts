@@ -17,6 +17,8 @@ export interface Session {
   products: Record<string, Product>;
   /** Product source actually used by the last search (after fallback). */
   last_source: "channel3" | "catalog" | null;
+  /** provider:model that produced the last step of the most recent chat turn (after any fallback). */
+  ai_active: string | null;
 }
 
 export function newId(prefix: string): string {
@@ -35,7 +37,7 @@ function load() {
   if (!storePath) return;
   try {
     const data = JSON.parse(readFileSync(storePath, "utf8")) as Session[];
-    for (const s of data) sessions.set(s.id, { ...s, products: s.products ?? {}, last_source: s.last_source ?? null });
+    for (const s of data) sessions.set(s.id, { ...s, products: s.products ?? {}, last_source: s.last_source ?? null, ai_active: s.ai_active ?? null });
     console.log(`[store] loaded ${sessions.size} session(s) from ${storePath}`);
   } catch (e: any) {
     if (e?.code !== "ENOENT") console.warn(`[store] could not load ${storePath}: ${e?.message}`);
@@ -79,6 +81,7 @@ export function createSession(): Session {
     ledger: [],
     products: {},
     last_source: null,
+    ai_active: null,
   };
   sessions.set(s.id, s);
   scheduleSave();
@@ -126,7 +129,7 @@ export function appState(s: Session): AppState {
     remaining: remaining(s),
     purchases: mid ? s.purchases.filter((p) => p.mandate_id === mid) : [],
     ledger: s.ledger,
-    mode: { payment: config.paymentMode, products: s.last_source ?? config.productSource, ai: aiLabel() },
+    mode: { payment: config.paymentMode, products: s.last_source ?? config.productSource, ai: aiLabel(), ai_active: s.ai_active },
   };
 }
 

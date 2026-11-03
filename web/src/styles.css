@@ -914,10 +914,59 @@ code {
 }
 .agent-text {
   margin: 0;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--ink);
   max-width: 68ch;
+}
+.agent-text.md > :first-child {
+  margin-top: 0;
+}
+.agent-text.md > :last-child {
+  margin-bottom: 0;
+}
+.agent-text.md p {
+  margin: 0 0 0.6em;
+}
+.agent-text.md ul,
+.agent-text.md ol {
+  margin: 0 0 0.6em;
+  padding-left: 1.4em;
+}
+.agent-text.md li {
+  margin: 0.2em 0;
+}
+.agent-text.md li > p {
+  margin: 0;
+}
+.agent-text.md a {
+  color: var(--brand);
+  text-decoration: underline;
+}
+.agent-text.md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+}
+.agent-text.md pre {
+  margin: 0 0 0.6em;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.06);
+}
+.agent-text.md pre code {
+  padding: 0;
+  background: none;
+}
+.agent-text.md h1,
+.agent-text.md h2,
+.agent-text.md h3,
+.agent-text.md h4 {
+  margin: 0.8em 0 0.4em;
+  font-size: 1em;
+  font-weight: 700;
 }
 
 .typing {

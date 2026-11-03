@@ -310,7 +310,7 @@ export const fixtureState: AppState = {
   remaining: 111.5,
   purchases: fixturePurchases,
   ledger: fixtureLedger,
-  mode: { payment: "mock", products: "catalog", ai: "gemini-3.8-flash" },
+  mode: { payment: "mock", products: "catalog", ai: "gemini-3.8-flash", ai_active: null },
 };
 
 // ---------- chat transcript ----------

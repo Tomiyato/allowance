@@ -100,7 +100,13 @@ export interface AppState {
   remaining: number; // budget_total - spent + refunded, 0 when no mandate
   purchases: Purchase[];
   ledger: LedgerRow[];
-  mode: { payment: PaymentMode; products: "channel3" | "catalog"; ai: string };
+  mode: {
+    payment: PaymentMode;
+    products: "channel3" | "catalog";
+    ai: string;
+    /** The provider:model that answered the most recent chat turn in this session; null before the first turn. */
+    ai_active: string | null;
+  };
 }
 
 // Agent tool outputs. Chat UI renders tool parts by tool name.

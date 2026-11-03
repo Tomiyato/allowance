@@ -10,6 +10,7 @@ import type {
   SearchProductsOutput,
 } from "../../../shared/types";
 import { api } from "../api";
+import { Markdown } from "../components/Markdown";
 import {
   FlaggedCard,
   GenericToolCard,
@@ -98,11 +99,7 @@ function Message({ m }: { m: UIMessage }) {
       <div className="msg-parts">
         {m.parts.map((part, i) => {
           if (part.type === "text") {
-            return part.text.trim() ? (
-              <p key={i} className="agent-text">
-                {part.text}
-              </p>
-            ) : null;
+            return part.text.trim() ? <Markdown key={i} text={part.text} /> : null;
           }
           if (part.type === "step-start" || part.type === "reasoning") return null;
           return <ToolPart key={isToolUIPart(part) ? part.toolCallId : i} part={part} />;

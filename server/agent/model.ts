@@ -2,7 +2,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { wrapLanguageModel, type LanguageModel } from "ai";
-import { aiModelId, config } from "../config.ts";
+import { aiLabel, aiModelId, config } from "../config.ts";
 
 type Model = LanguageModelV4;
 
@@ -101,17 +101,33 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * and the rest of the request sticks to it. Without a fallback, streamText's own maxRetries
  * (exponential backoff) handles retries.
  */
-export function model(): LanguageModel {
+export function model(onActive?: (label: string) => void): LanguageModel {
   const primary = primaryModel();
   const fallback = fallbackModel();
-  if (!fallback) return primary;
+  const primaryLabel = aiLabel();
+  const spec = fallbackSpec();
+  const fallbackLabel = spec ? `${spec.provider}:${spec.model}` : primaryLabel;
+  if (!fallback) {
+    if (!onActive) return primary;
+    const note = async <T>(call: () => PromiseLike<T>): Promise<T> => {
+      const r = await call();
+      onActive(primaryLabel);
+      return r;
+    };
+    return wrapLanguageModel({
+      model: primary,
+      middleware: { specificationVersion: "v4", wrapStream: ({ doStream }) => note(doStream), wrapGenerate: ({ doGenerate }) => note(doGenerate) },
+    });
+  }
   let useFallback = false;
 
   async function run<T>(callPrimary: () => PromiseLike<T>, callFallback: () => PromiseLike<T>): Promise<T> {
     if (!useFallback) {
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          return await callPrimary();
+          const r = await callPrimary();
+          onActive?.(primaryLabel);
+          return r;
         } catch (e) {
           if (!isCapacityError(e)) throw e;
           if (attempt === 0 && !isQuotaError(e)) {
@@ -124,7 +140,9 @@ export function model(): LanguageModel {
         }
       }
     }
-    return callFallback();
+    const r = await callFallback();
+    onActive?.(fallbackLabel);
+    return r;
   }
 
   return wrapLanguageModel({
