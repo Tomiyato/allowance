@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="theme.css" />
+<!--
+  Stage pieces around the recorded app, rendered at 1920×1080:
+    ?kind=frame&host=…   background + browser-like window (title bar with the URL); the app area is a
+                         transparent hole with rounded corners, laid over the recorded clip
+    ?kind=caption&text=… transparent, lower-third caption in the band under the window
+    ?kind=badge          transparent, "sped up" badge in the window title bar
+  Geometry matches STAGE in scripts/video/lib.mjs: window x 192, y 18, 1536 wide, 34 px bar + 900 px app.
+-->
+<style>
+  :root { --x: 192px; --y: 18px; --w: 1536px; --bar: 34px; --h: 900px; --r: 14px; }
+  .layer { position: absolute; inset: 0; }
+  .window {
+    position: absolute; left: var(--x); top: var(--y); width: var(--w); height: calc(var(--bar) + var(--h));
+    border-radius: var(--r); background: transparent;
+    box-shadow: 0 0 0 1px rgba(16, 40, 56, 0.10), 0 24px 70px rgba(16, 40, 56, 0.22), 0 4px 12px rgba(16, 40, 56, 0.08);
+    overflow: hidden;
+  }
+  .bar {
+    height: var(--bar); display: grid; grid-template-columns: 120px 1fr 120px; align-items: center;
+    background: #eef2f4; border-bottom: 1px solid #dfe5ea;
+  }
+  .dots { display: flex; gap: 8px; padding-left: 16px; }
+  .dots i { width: 12px; height: 12px; border-radius: 50%; background: #cfd8e0; }
+  .url {
+    justify-self: center; display: flex; align-items: center; gap: 8px; min-width: 460px; justify-content: center;
+    height: 24px; padding: 0 16px; border-radius: 8px; background: #fff; border: 1px solid #dfe5ea;
+    font-size: 15px; color: var(--muted); font-weight: 500;
+  }
+  .url svg { color: #8a99a6; }
+
+  .mask {
+    position: absolute; inset: 0;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'><path fill-rule='evenodd' d='M0 0H1920V1080H0Z M206 18 H1714 A14 14 0 0 1 1728 32 V938 A14 14 0 0 1 1714 952 H206 A14 14 0 0 1 192 938 V32 A14 14 0 0 1 206 18 Z'/></svg>");
+  }
+
+  .caption {
+    position: absolute; left: 0; right: 0; top: 952px; height: 128px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .caption div {
+    display: flex; align-items: center; gap: 18px;
+    max-width: 1536px; padding: 14px 30px 14px 22px; border-radius: 16px;
+    background: rgba(14, 59, 67, 0.94); color: #fff;
+    box-shadow: 0 10px 30px rgba(16, 40, 56, 0.25);
+    font-size: 32px; font-weight: 600; letter-spacing: -0.005em; line-height: 1.2;
+  }
+  .caption i { flex: none; width: 6px; align-self: stretch; border-radius: 3px; background: var(--mint); }
+
+  .badge {
+    position: absolute; right: calc(1920px - var(--x) - var(--w) + 14px); top: calc(var(--y) + 5px); height: 24px;
+    display: flex; align-items: center; gap: 7px; padding: 0 12px 0 9px; border-radius: 999px;
+    background: var(--brand); color: #fff; font-size: 14px; font-weight: 700; letter-spacing: 0.02em;
+  }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const kind = q.get("kind") ?? "frame";
+    const root = document.getElementById("root");
+    const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    document.body.className = "transparent";
+    if (kind === "frame") {
+      root.innerHTML = `<div class="mask bg"></div><div class="window"><div class="bar"><span class="dots"><i></i><i></i><i></i></span>
+        <span class="url"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>${esc(q.get("host") ?? "")}</span><span></span></div></div>`;
+    } else if (kind === "caption") {
+      root.innerHTML = `<div class="caption"><div><i></i><span>${esc(q.get("text") ?? "")}</span></div></div>`;
+    } else if (kind === "badge") {
+      root.innerHTML = `<div class="badge"><svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor"><path d="M0 0l7 6-7 6zM8 0l7 6-7 6z"/></svg>sped up</div>`;
+    }
+  </script>
+</body>
+</html>

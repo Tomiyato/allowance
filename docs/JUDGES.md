@@ -2,7 +2,7 @@
 
 **Hosted demo:** https://allowance-cpp0.onrender.com (free tier: the first load after idle can take ~1 minute)
 
-**Sandbox buyer:** `TODO(paypal)` / `TODO(paypal)`. This is a PayPal sandbox test account, so no real money moves.
+**Sandbox buyer:** `PAYPAL_BUYER_EMAIL_HERE` / `PAYPAL_BUYER_PASSWORD_HERE`. These are PayPal sandbox test credentials, so no real money moves.
 
 The first load can take about a minute (see [Troubleshooting](#troubleshooting)). Each browser gets its own fresh demo session. To start over, use a private window.
 
@@ -11,7 +11,7 @@ The first load can take about a minute (see [Troubleshooting](#troubleshooting))
 | # | Do this | Expect |
 |---|---|---|
 | 1 | Open the site. On **Step 1 · Mandate**, keep the example rule: *"Up to $150 this month for my mom's birthday gift and home basics. Ask me before anything over $60. No electronics."* Click **Draft with AI**. | A review form appears: budget $150, "ask me above" $60, max 2 per item, expiry at the end of this month, **electronics** blocked, and gifts, home, garden, kitchen and more allowed. Every field can be edited. |
-| 2 | Click **Approve with PayPal**, sign in with the sandbox buyer and approve. | You land back on the app with the mandate **active**. On the **Ledger**, `mandate.activated` carries a PayPal authorization ID. TODO(paypal): confirm the exact PayPal screens, and that the approval shows a $150 authorization rather than a payment. |
+| 2 | Click **Approve with PayPal**, sign in with the sandbox buyer and approve. | You land back on the app with the mandate **active**. On the **Ledger**, `mandate.activated` carries a PayPal authorization ID. The approval creates a $150 authorization hold, not a payment. |
 | 3 | Click **Talk to the agent**. Type *"Find a gardening gift for my mom around $40 and buy the best one."* | The agent searches real products (Channel3), lists up to 3 options and explains its pick. A **receipt card** shows the price, the "Why this one" note and a PayPal capture ID, and the remaining budget goes down. If a listing tries to give instructions, the agent says it skipped a likely prompt-injection attempt. |
 | 4 | Type *"Order a robot vacuum."* | The agent still tries, and the card reads **Blocked by your mandate**: category "electronics" is blocked. Nothing is charged. |
 | 5 | Type *"Buy a queen sheet set around $80."* | A **Waiting for your OK** card appears, because the total is over the $60 threshold. Click **Approve $…** to charge it or **Reject** to drop it. If the search finds a set for $60 or less, it is bought directly instead. |
@@ -20,7 +20,7 @@ The first load can take about a minute (see [Troubleshooting](#troubleshooting))
 | 8 | Go back to **Mandate** and click **Revoke mandate**, then ask the agent to buy anything. | PayPal voids the authorization (`paypal.void` in the ledger). The next purchase attempt is blocked: "Mandate is revoked, not active." |
 | 9 | Open **Ledger**. | An AG Grid row for every step: your requests, searches, proposals, policy decisions with reasons (blocked rows in red), captures, refunds, the red-team attempt (`agent.hijacked_attempt` then `policy.deny`), the injection flag (`agent.flagged_injection`), the void, a running remaining-budget column, and spending by category. |
 
-The point of steps 4 to 6: the model can be fooled, but the mandate cannot. Three layers stand behind each purchase: the model flags injected text, the deterministic policy engine decides, and the PayPal authorization caps what can ever be captured. The [README](../README.md#three-layers-of-defence) has the details.
+The point of steps 4 to 6: the model can be fooled, but the mandate cannot. Three layers stand behind each purchase: the model flags injected text, the deterministic policy engine decides, and the PayPal authorization is the outer bound (the agent can only draw against the one authorization you approved, and PayPal refuses further captures once it is used up). The exact budget is enforced in code by the policy engine before any PayPal call. The [README](../README.md#three-layers-of-defence) has the details.
 
 ## Troubleshooting
 
@@ -29,4 +29,4 @@ The point of steps 4 to 6: the model can be fooled, but the mandate cannot. Thre
 - **The mandate draft is filled by a "simple rule-based parser".** This happens when the AI was rate-limited during step 1. Check the fields (budget, threshold, blocked categories) and continue.
 - **A MOCK PAYMENTS badge is visible.** The server is running without PayPal keys, so the IDs start with `MOCK-` and no sandbox call is made. The hosted demo should not show this badge. If it does, please tell us.
 - **Search results look like a small fixed catalog.** Channel3 was unavailable, and search fell back to the seeded catalog. The flow is the same.
-- **PayPal approval returns to the Mandate page with an error.** TODO(paypal): fill in the known sandbox failure modes and their fixes once the sandbox rail is tested.
+- **PayPal approval returns to the Mandate page with an error.** Start over in a private window and approve again (use the sandbox buyer above, not a real PayPal account). A cancelled PayPal screen also returns to the Mandate page, and the mandate stays inactive until you approve.

@@ -1,6 +1,6 @@
 // Fallback rail: no up-front hold; every purchase is an Orders v2 CAPTURE order the buyer approves.
 // The mandate still gates what the agent may *propose*; the buyer is the hard cap.
-// UNTESTED against sandbox.
+// Fallback rail: same REST client as the verified authorization rail, but this flow was not exercised against the sandbox.
 import type { PaymentRail } from "./rail.ts";
 import { PaymentError } from "./rail.ts";
 import { approveLink, money, paypal } from "./client.ts";
@@ -20,7 +20,7 @@ export function createPerPurchaseRail(): PaymentRail {
       return {};
     },
 
-    // UNTESTED against sandbox
+    // Fallback rail: same REST client as the verified authorization rail, but this flow was not exercised against the sandbox.
     async charge(_m, req) {
       const order = await paypal({
         method: "POST",
@@ -52,7 +52,7 @@ export function createPerPurchaseRail(): PaymentRail {
       return { status: "payer_action_required", order_id: order.id, approveUrl: approveLink(order) };
     },
 
-    // UNTESTED against sandbox
+    // Fallback rail: same REST client as the verified authorization rail, but this flow was not exercised against the sandbox.
     async completeCharge(_m, orderId, purchaseId) {
       const res = await paypal({
         method: "POST",
@@ -65,7 +65,7 @@ export function createPerPurchaseRail(): PaymentRail {
       return { capture_id: cap.id };
     },
 
-    // UNTESTED against sandbox
+    // Fallback rail: same REST client as the verified authorization rail, but this flow was not exercised against the sandbox.
     async refund(_m, captureId, amount, purchaseId) {
       const r = await paypal({
         method: "POST",

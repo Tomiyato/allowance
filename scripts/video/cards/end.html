@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="theme.css" />
+<style>
+  main { height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 0 200px; }
+  .brand { display: flex; align-items: center; gap: 22px; font-size: 52px; font-weight: 800; letter-spacing: -0.03em; color: var(--brand); }
+  .tagline { margin: 44px 0 64px; font-size: 104px; font-weight: 700; line-height: 1.06; letter-spacing: -0.035em; }
+  .tagline em { font-style: normal; color: var(--accent); }
+  .tagline .not { color: var(--muted); }
+  .links { display: flex; gap: 28px; }
+  .link {
+    display: flex; align-items: center; gap: 18px;
+    padding: 20px 30px 20px 24px; border-radius: 20px;
+    background: var(--surface); border: 1px solid var(--line);
+    box-shadow: 0 2px 4px rgba(16, 40, 56, 0.05), 0 14px 36px rgba(16, 40, 56, 0.10);
+    font-size: 38px; font-weight: 650; color: var(--ink); letter-spacing: -0.01em;
+  }
+  .link .ic { width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+  .link small { display: block; font-size: 22px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; text-transform: uppercase; margin-bottom: 2px; }
+  .built { margin-top: 64px; display: flex; align-items: center; gap: 18px; font-size: 30px; font-weight: 600; color: var(--muted); }
+  .built i { width: 52px; height: 4px; border-radius: 2px; background: var(--mint); }
+</style>
+</head>
+<body class="bg">
+  <main>
+    <div class="brand">
+      <svg class="mark" width="76" height="76" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="8" fill="#0e3b43" />
+        <path d="M8 21a8 8 0 0 1 16 0" fill="none" stroke="#7dd3c0" stroke-width="3" stroke-linecap="round" />
+        <path d="M8 21a8 8 0 0 1 4.3-7.1" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" />
+        <circle cx="16" cy="21" r="2" fill="#fff" />
+      </svg>
+      Allowance
+    </div>
+    <p class="tagline">Give your AI agent an <em>allowance</em>,<br /><span class="not">not your wallet.</span></p>
+    <div class="links">
+      <div class="link">
+        <span class="ic"><svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.56 9.56 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></svg></span>
+        <span><small>Code</small>github.com/Tomiyato/allowance</span>
+      </div>
+      <div class="link">
+        <span class="ic"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/></svg></span>
+        <span><small>Live demo</small>allowance-cpp0.onrender.com</span>
+      </div>
+    </div>
+    <div class="built"><i></i>Built with PayPal · Gemini · Channel3 · AG Grid · Render</div>
+  </main>
+</body>
+</html>

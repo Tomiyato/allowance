@@ -1,0 +1,46 @@
+/* Shared look for the video cards; colors follow web/src/styles.css and docs/gallery/cover.html. */
+:root {
+  --bg: #f4f6f7;
+  --surface: #ffffff;
+  --ink: #13293a;
+  --ink-2: #3e5162;
+  --muted: #5d6c7a;
+  --line: #e2e8ee;
+  --line-strong: #cfd8e0;
+  --brand: #0e3b43;
+  --accent: #0f766e;
+  --accent-ink: #0b5e58;
+  --accent-soft: #e5f3f0;
+  --mint: #7dd3c0;
+  --ok: #067647;
+  --ok-soft: #ecfdf3;
+  --ok-line: #abefc6;
+  --wait: #93370d;
+  --wait-soft: #fffaeb;
+  --wait-line: #fedf89;
+  --block: #b42318;
+  --block-soft: #fef3f2;
+  --block-line: #fecdca;
+  --paypal: #003087;
+  --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  font-family: var(--font);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+.bg {
+  background:
+    radial-gradient(1100px 820px at 100% 0%, rgba(125, 211, 192, 0.34), transparent 60%),
+    radial-gradient(900px 760px at 0% 100%, rgba(15, 118, 110, 0.11), transparent 60%),
+    var(--bg);
+}
+.transparent { background: transparent; }
+.mark { flex: none; filter: drop-shadow(0 10px 24px rgba(14, 59, 67, 0.28)); }

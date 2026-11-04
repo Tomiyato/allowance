@@ -1,7 +1,8 @@
 // Plan A rail: one Orders v2 AUTHORIZE for the whole budget, partial captures per purchase.
-// PayPal itself then refuses to release more than was authorized (subject to PayPal's own
-// over-capture rules — see assumptions in the report).
-// UNTESTED against sandbox.
+// PayPal is the outer bound: once the authorization is used up it refuses further captures, but it
+// accepted an over-capture on the capture that exhausted it (sandbox), so the policy engine owns the
+// exact budget.
+// Verified against the PayPal sandbox: see docs/research/paypal-sandbox-results.md.
 import type { PaymentRail } from "./rail.ts";
 import { PaymentError } from "./rail.ts";
 import { approveLink, money, paypal } from "./client.ts";
@@ -10,7 +11,7 @@ export function createAuthorizationRail(): PaymentRail {
   return {
     mode: "authorization",
 
-    // UNTESTED against sandbox
+    // Verified against the PayPal sandbox on 2026-11-04 (see docs/research/paypal-sandbox-results.md).
     async authorizeMandate(m, urls) {
       const order = await paypal({
         method: "POST",
@@ -42,7 +43,7 @@ export function createAuthorizationRail(): PaymentRail {
       return { approveUrl: approveLink(order), paypal: { order_id: order.id } };
     },
 
-    // UNTESTED against sandbox
+    // Verified against the PayPal sandbox on 2026-11-04 (see docs/research/paypal-sandbox-results.md).
     async finalize(m, token) {
       const orderId = m.paypal.order_id ?? token;
       if (token && m.paypal.order_id && token !== m.paypal.order_id) {
@@ -62,7 +63,7 @@ export function createAuthorizationRail(): PaymentRail {
       return { order_id: orderId, authorization_id: auth.id };
     },
 
-    // UNTESTED against sandbox
+    // Verified against the PayPal sandbox on 2026-11-04 (see docs/research/paypal-sandbox-results.md).
     async charge(m, req) {
       if (!m.paypal.authorization_id) throw new PaymentError("Mandate has no PayPal authorization.");
       const cap = await paypal({
@@ -84,7 +85,7 @@ export function createAuthorizationRail(): PaymentRail {
       return { status: "captured", order_id: m.paypal.order_id, capture_id: cap.id };
     },
 
-    // UNTESTED against sandbox
+    // Verified against the PayPal sandbox on 2026-11-04 (see docs/research/paypal-sandbox-results.md).
     async refund(_m, captureId, amount, purchaseId) {
       const r = await paypal({
         method: "POST",
@@ -96,7 +97,7 @@ export function createAuthorizationRail(): PaymentRail {
       return { refund_id: r.id };
     },
 
-    // UNTESTED against sandbox
+    // Verified against the PayPal sandbox on 2026-11-04 (see docs/research/paypal-sandbox-results.md).
     async revoke(m) {
       if (!m.paypal.authorization_id) return { paypal_id: null };
       try {

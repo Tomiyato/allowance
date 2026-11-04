@@ -8,7 +8,7 @@
 
 AI agents can now find and pick products, but nobody wants to hand an agent a card number. Today the choice is "approve every click" (no point in an agent) or "full access" (one prompt injection away from disaster).
 
-Allowance is a **spending mandate** between a person and their AI shopping agent: a budget, allowed categories, a per-item limit above which the agent must ask, and an expiry. The person approves the mandate once with PayPal; the agent then buys on its own inside it. Rules are enforced in code and by PayPal itself, never by the LLM's good behavior.
+Allowance is a **spending mandate** between a person and their AI shopping agent: a budget, allowed categories, a per-item limit above which the agent must ask, and an expiry. The person approves the mandate once with PayPal; the agent then buys on its own inside it. Rules are enforced in code, with PayPal as the outer bound, never by the LLM's good behavior.
 
 Audience for the pitch: busy people delegating errands (gifts, household restock), and small-business owners delegating routine supply reorders. Demo persona: a person buying a birthday gift and restocking home supplies.
 
@@ -52,13 +52,13 @@ Overall 1st–3rd; Best Use of Agentic Commerce; Best Use of PayPal + AI; Most C
 
 Spending power is attached to the mandate in one of three modes. All three are implemented behind one interface `PaymentRail` (`authorizeMandate`, `charge`, `refund`, `revoke`), selected by env `PAYMENT_MODE`.
 
-| Mode | Approve once | Agent charge | Hard cap enforced by | Status |
+| Mode | Approve once | Agent charge | Exact budget enforced by | Status |
 |---|---|---|---|---|
-| `authorization` (**plan A**) | Orders v2 `intent: AUTHORIZE` for `budget_total`; buyer approves | `POST /v2/payments/authorizations/{id}/capture` with partial `amount`, `final_capture: false` | **PayPal** (cannot capture more than authorized) | needs spike: multiple partial captures in sandbox |
+| `authorization` (**plan A**) | Orders v2 `intent: AUTHORIZE` for `budget_total`; buyer approves | `POST /v2/payments/authorizations/{id}/capture` with partial `amount`, `final_capture: false` | our policy engine; PayPal is the outer bound (one authorization, further captures refused once it is used up; an over-capture on the final capture was accepted in the sandbox) | verified in sandbox (ships) |
 | `vault` (plan B) | `POST /v3/vault/setup-tokens` (paypal, `usage_type: MERCHANT`) → approve → `POST /v3/vault/payment-tokens` | `POST /v2/checkout/orders` with `payment_source.paypal.vault_id`, capture | our policy engine | needs spike: billing-agreement gate in sandbox |
-| `per_purchase` (fallback, always works) | none | Orders v2 `CAPTURE` per purchase; buyer approves each via one-tap approve link | buyer | works |
+| `per_purchase` (fallback, always works) | none | Orders v2 `CAPTURE` per purchase; buyer approves each via one-tap approve link | buyer | implemented, fallback; not exercised in the demo |
 
-Pitch line for plan A: "Even if the agent is fully compromised, PayPal will not release more than the mandate."
+Pitch line for plan A: "Even if the agent is fully compromised, it can only draw against the one authorization you approved, and the policy engine owns the exact budget."
 
 Also used:
 - **Refunds:** `POST /v2/payments/captures/{capture_id}/refund` (partial allowed).

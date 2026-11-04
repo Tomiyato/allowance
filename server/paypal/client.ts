@@ -1,5 +1,5 @@
 // PayPal REST client: OAuth client-credentials token cache + JSON requests with idempotency.
-// UNTESTED against sandbox (no PayPal keys yet). Written from docs/research/paypal.md.
+// Verified against the PayPal sandbox on 2026-11-04 (see docs/research/paypal-sandbox-results.md).
 import { randomUUID } from "node:crypto";
 import { config } from "../config.ts";
 import { PaymentError } from "./rail.ts";

@@ -156,7 +156,7 @@ function Receipt({ p }: { p: Purchase }) {
         <Icon name={refunded ? "undo" : "receipt"} />
         <div>
           <strong>{refunded ? "Purchased, then refunded" : "Purchased inside your mandate"}</strong>
-          <span>{refunded ? "The money went back to the buyer's PayPal." : "Paid with PayPal. No approval was needed."}</span>
+          <span>{refunded ? "The money went back to the buyer's PayPal." : p.decision === "needs_approval" ? "You approved it; paid with PayPal." : "Paid with PayPal. No approval was needed."}</span>
         </div>
         {refunded && <span className="stamp">Refunded</span>}
       </header>

@@ -182,7 +182,7 @@ export function AgentPage() {
   const simsAt = (i: number) => simulations.filter((x) => Math.min(x.at, messages.length) === i);
   const capNote =
     state?.mode.payment === "authorization" && m
-      ? ` Behind that, PayPal's ${money(m.budget_total)} authorization hold caps what can ever be captured.`
+      ? ` Behind that, PayPal holds the outer bound: the agent can only draw against the single ${money(m.budget_total)} authorization you approved.`
       : "";
 
   const onSubmit = (e: FormEvent) => {

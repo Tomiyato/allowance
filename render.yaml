@@ -35,8 +35,7 @@ services:
         sync: false
       - key: PAYPAL_ENV
         value: sandbox
-      # authorization = plan A (one hold, partial captures). Falls back to mock if the PayPal keys are missing.
-      # TODO(paypal): switch to per_purchase if the sandbox spike shows multiple partial captures do not work.
+      # authorization = one hold, partial captures (verified in the PayPal sandbox). Falls back to mock if the PayPal keys are missing.
       - key: PAYMENT_MODE
         value: authorization
 
@@ -49,8 +48,8 @@ services:
         value: "1"
 
       # --- Server ---
-      # Optional. Leave empty to derive PayPal return URLs from the request (Render forwards https).
+      # Public base URL, so PayPal return URLs use https behind Render's proxy.
       - key: PUBLIC_URL
-        sync: false
+        value: https://allowance-cpp0.onrender.com
       # PORT is set by Render. STORE_FILE keeps its default (.data/store.json); the free tier has no
       # persistent disk, so sessions reset on every restart or spin-down.

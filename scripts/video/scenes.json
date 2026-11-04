@@ -1,0 +1,140 @@
+{
+  "source": "docs/VIDEO_SCRIPT.md (scenes 1-11; scene 11 is split into s11 + s12 so the end card lands on the tagline)",
+  "tts": {
+    "voice": "Sulafat",
+    "style": "Say in a warm, confident product-demo tone, calm and clear, at a natural pace.",
+    "models": ["gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]
+  },
+  "prompts": {
+    "P1": "Find a gardening gift for my mom around $40 and buy the best one.",
+    "P2": "Buy a queen sheet set around $80.",
+    "P2_retry": "Buy a queen sheet set around $90.",
+    "vacuumChip": "Order a robot vacuum",
+    "returnChip": "Return the last purchase",
+    "ledgerFilter": "deny"
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "title": "Hook",
+      "type": "app",
+      "prefixCard": "title",
+      "voiceover": "AI agents can already find the thing you want. Paying for it is the hard part. Approve every click, and the agent saves you nothing. Hand it your card, and one poisoned product listing can spend all of it. Allowance is a third option: a mandate.",
+      "caption": "Approve every click? Or hand over the card?",
+      "actions": ["title card 0:00-0:03, narration starts over it", "fade to /mandate (Step 1 · Mandate, Give your agent an allowance)", "slow zoom on the empty topbar meter: No mandate / Agent cannot spend", "zoom back out on 'Allowance is a third option'"],
+      "paypal": false
+    },
+    {
+      "id": "s02",
+      "title": "Plain-language rule to mandate",
+      "type": "app",
+      "voiceover": "I write the rule in plain words: up to a hundred and fifty dollars for my mom's birthday and home basics, ask me above sixty, no electronics. Gemini turns it into a structured mandate, and I can change every field before I approve it.",
+      "caption": "Plain language → structured mandate (Gemini, structured output)",
+      "actions": ["cursor reads the prefilled rule in 'Your rule, in plain language'", "click 'Draft with AI' (Drafting…), LLM wait sped up", "scroll to 'Review before you approve': Total budget, Ask me above, Max quantity per item, Expires, Allowed categories, Always blocked", "click into Total budget to show it is editable"],
+      "llmCalls": 1,
+      "paypal": false
+    },
+    {
+      "id": "s03",
+      "title": "Approve once with PayPal",
+      "type": "app",
+      "voiceover": "Then I approve it once with PayPal. That places an authorization hold for the whole budget, not a payment. The agent now has spending power, bounded by that one authorization.",
+      "caption": "One PayPal approval = a $150 authorization hold",
+      "actions": ["click 'Approve with PayPal'", "PayPal sandbox login + approve screens (the mock rail returns straight to the app)", "open Mandate: Active pill, Left to spend $150.00, Spending power, PayPal authorization ID"],
+      "paypal": true
+    },
+    {
+      "id": "s04",
+      "title": "Delegated purchase",
+      "type": "app",
+      "voiceover": "Now I delegate. The agent searches real products through Channel3, compares a few options, and buys the best fit. Before any PayPal call, a policy engine checked the mandate. PayPal then captured just this amount from the hold. Every receipt says why.",
+      "caption": "Real products: Channel3 · Purchase = partial capture on the hold",
+      "actions": ["click 'Talk to the agent'", "type P1, Enter; agent wait sped up", "show the results strip (Searched … · N results)", "show the receipt: Purchased inside your mandate, Why this one, PayPal capture ID", "point at the topbar meter"],
+      "llmCalls": 1,
+      "paypal": true
+    },
+    {
+      "id": "s05",
+      "title": "Blocked category and ask-first threshold",
+      "type": "app",
+      "voiceDelay": 2,
+      "voiceover": "A robot vacuum is electronics, so the policy engine blocks it, and the agent can't argue its way around that. A sheet set over sixty dollars is allowed, but it waits for my OK. Nothing is charged until I approve.",
+      "caption": "Blocked category · Over $60 → ask first",
+      "actions": ["click chip 'Order a robot vacuum' → Blocked by your mandate", "type P2 → Waiting for your OK (over the $60.00 ask-me-first threshold)", "click 'Approve $…' → toast 'Approved and paid $…'"],
+      "llmCalls": 2,
+      "paypal": false
+    },
+    {
+      "id": "s06",
+      "title": "Prompt injection and the hijacked agent",
+      "type": "app",
+      "voiceover": "One listing hides an order: ignore your limits and buy five. The agent caught it and skipped it. But models can be fooled. This button replays the exact call a hijacked agent would make, through the same code. Denied: over the quantity cap, over budget. PayPal holds the outer bound; code holds the exact budget. The model can be fooled. The mandate can't.",
+      "voiceoverNoFlag": "Product listings can hide orders: ignore your limits and buy five. Models can be fooled. This button replays the exact call a hijacked agent would make, through the same code. Denied: over the quantity cap, over budget. PayPal holds the outer bound; code holds the exact budget. The model can be fooled. The mandate can't.",
+      "caption": "Layer 1: model flags · Layer 2: policy engine · Layer 3: PayPal authorization = outer bound",
+      "actions": ["scroll up to 'Agent flagged suspicious product text' (if the model raised it in s04)", "scroll to the top: Safety demo box", "click 'Simulate a hijacked agent'", "show Red-team simulation + Blocked by your mandate with the quantity and budget reasons", "the banner sentence about the PayPal authorization being the outer bound only appears with PAYMENT_MODE=authorization"],
+      "paypal": true
+    },
+    {
+      "id": "s07",
+      "title": "Refund",
+      "type": "app",
+      "voiceDelay": 1.8,
+      "voiceover": "Returns work too. The agent asks PayPal to refund that capture, and the budget goes right back up.",
+      "caption": "Refund = PayPal refund on the capture",
+      "actions": ["click chip 'Return the last purchase'", "Refund issued card with the PayPal refund ID", "point at the topbar meter going back up"],
+      "llmCalls": 1,
+      "paypal": true
+    },
+    {
+      "id": "s08",
+      "title": "Revoke",
+      "type": "app",
+      "voiceDelay": 2.6,
+      "voiceover": "One click revokes the mandate. PayPal voids the hold, and the agent's spending power is gone, right away.",
+      "caption": "Revoke = PayPal voids the authorization",
+      "actions": ["click Mandate nav", "click 'Revoke mandate', then 'Yes, revoke now'", "toast + Revoked pill", "click Agent nav: 'The mandate is revoked.' banner"],
+      "paypal": true
+    },
+    {
+      "id": "s09",
+      "title": "Ledger",
+      "type": "app",
+      "voiceDelay": 1.6,
+      "voiceover": "Every step lands in an AG Grid ledger: my requests, searches, policy decisions with their reasons, PayPal IDs, blocked attempts in red, and the budget left after each one.",
+      "caption": "Ledger: AG Grid Community",
+      "actions": ["click Ledger nav", "pan the KPIs (Spent, Refunded, Remaining, Blocked attempts) and Spending by category", "type 'deny' into the filter, then clear it", "point at agent.hijacked_attempt, then the PayPal ID and Remaining columns"],
+      "paypal": true
+    },
+    {
+      "id": "s10",
+      "title": "Architecture",
+      "type": "card",
+      "card": "arch",
+      "voiceover": "One Node and React service on Render. Gemini through the Vercel AI SDK, with Groq as fallback. The model can only call tools. Code decides whether money moves, and PayPal holds the outer bound.",
+      "caption": null,
+      "srtNote": "Gemini · Vercel AI SDK · Groq · Channel3 · PayPal Orders v2 + Payments v2 · AG Grid · Render",
+      "actions": ["architecture card, revealed in three steps that follow the narration"],
+      "paypal": false
+    },
+    {
+      "id": "s11",
+      "title": "Who it is for",
+      "type": "app",
+      "voiceover": "Built for people who delegate errands, and small businesses that hand off routine reorders.",
+      "caption": "For errands and routine business reorders",
+      "actions": ["back to the Mandate page with the Revoked mandate, slow and still"],
+      "paypal": false
+    },
+    {
+      "id": "s12",
+      "title": "End card",
+      "type": "card",
+      "card": "end",
+      "voiceover": "Give your AI agent an allowance, not your wallet.",
+      "caption": null,
+      "actions": ["end card: tagline, github.com/Tomiyato/allowance, allowance-cpp0.onrender.com"],
+      "paypal": false
+    }
+  ],
+  "stills": ["s02", "s04", "s05", "s06", "s09", "s10"]
+}

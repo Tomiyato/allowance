@@ -14,7 +14,8 @@
     "build": "node scripts/build-web.mjs",
     "test": "vitest run server",
     "typecheck": "tsc --noEmit",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "video": "node scripts/video/run.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.111",
