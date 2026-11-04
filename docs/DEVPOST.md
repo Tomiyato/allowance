@@ -108,4 +108,4 @@ typescript, node.js, express, react, vite, vercel-ai-sdk, google-gemini, groq, g
 - **Live demo:** https://allowance-cpp0.onrender.com (free tier: the first load after idle can take about a minute)
 - **Demo video:** TODO(video): YouTube link
 - **Judges' 2-minute test path:** https://github.com/Tomiyato/allowance/blob/main/docs/JUDGES.md
-- **Sandbox buyer for "Approve with PayPal":** `PAYPAL_BUYER_EMAIL_HERE` / `PAYPAL_BUYER_PASSWORD_HERE` (PayPal sandbox test credentials, no real money; also in the README)
+- **Sandbox buyer for "Approve with PayPal":** `sb-aktpl53694657@personal.example.com` / `Lc:)K9dT` (PayPal sandbox test credentials, no real money; also in the README)

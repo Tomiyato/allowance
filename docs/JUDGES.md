@@ -2,7 +2,7 @@
 
 **Hosted demo:** https://allowance-cpp0.onrender.com (free tier: the first load after idle can take ~1 minute)
 
-**Sandbox buyer:** `PAYPAL_BUYER_EMAIL_HERE` / `PAYPAL_BUYER_PASSWORD_HERE`. These are PayPal sandbox test credentials, so no real money moves.
+**Sandbox buyer:** `sb-aktpl53694657@personal.example.com` / `Lc:)K9dT`. These are PayPal sandbox test credentials, so no real money moves.
 
 The first load can take about a minute (see [Troubleshooting](#troubleshooting)). Each browser gets its own fresh demo session. To start over, use a private window.
 

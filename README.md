@@ -189,8 +189,8 @@ Frontend hot reload (optional): run the server, then `npm --prefix web run dev` 
 
 A PayPal sandbox personal account for the "Approve with PayPal" step. These are PayPal sandbox test credentials only (no real money).
 
-- Email: `PAYPAL_BUYER_EMAIL_HERE`
-- Password: `PAYPAL_BUYER_PASSWORD_HERE`
+- Email: `sb-aktpl53694657@personal.example.com`
+- Password: `Lc:)K9dT`
 
 ## Tests
 
