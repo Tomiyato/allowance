@@ -9,14 +9,29 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DIRS, ROOT, RUN_STATE, bumpUsage, ffmpeg, loadScenes, log, readJson, variantFor, voiceText } from "./lib.mjs";
 
+const ONES = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split(" ");
+const TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split(" ");
+/** 0-999 in words ("one hundred seventy"), so "$170" and "a hundred and seventy" compare equal. */
+function numWords(n) {
+  if (n < 20) return ONES[n];
+  if (n < 100) return `${TENS[Math.floor(n / 10)]}${n % 10 ? ` ${ONES[n % 10]}` : ""}`;
+  if (n < 1000) return `${ONES[Math.floor(n / 100)]} hundred${n % 100 ? ` ${numWords(n % 100)}` : ""}`;
+  return String(n);
+}
+
+/** Words for the diff: lower case, numbers spelled out, "%" as "percent", "and" dropped on both sides. */
 const norm = (s) =>
   s
     .toLowerCase()
     .replace(/[’']/g, "")
-    .replace(/\$?150/g, "a hundred and fifty")
+    .replace(/channel\s?3/g, "channelthree")
+    .replace(/(\d+)\.00\b/g, "$1")
+    .replace(/%/g, " percent")
+    .replace(/\d+/g, (d) => ` ${numWords(Number(d))} `)
+    .replace(/\ba hundred\b/g, "one hundred")
     .replace(/[^a-z0-9 ]+/g, " ")
     .split(/\s+/)
-    .filter(Boolean);
+    .filter((w) => w && w !== "and");
 
 /** Word-level LCS diff: returns { missing: [...], extra: [...], ratio }. */
 function diff(a, b) {
@@ -116,7 +131,7 @@ export async function verifyAudio() {
   }
   if (!res) throw new Error("verify: no transcription service answered");
   const { heard, model } = res;
-  const expected = cfg.scenes.map((s) => voiceText(s, variantFor(s, state))).join(" ");
+  const expected = cfg.scenes.map((s) => voiceText(s, variantFor(s, state))).filter(Boolean).join(" ");
   const d = diff(norm(expected), norm(heard));
   log(`Transcript (${model}): ${heard.length} chars; ${(d.ratio * 100).toFixed(1)}% of the script's words heard in order`);
   if (d.missing.length) log(`  not heard: ${d.missing.join(" ")}`);

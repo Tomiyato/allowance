@@ -1,21 +1,24 @@
-// Composes video-out/allowance-demo.mp4 (+ .srt and review stills) from the cached parts:
+// Composes video-out/ribbon-demo.mp4 (+ .srt and review stills) from the cached parts:
 // TTS WAVs, recorded clips, card/caption PNGs. Needs no browser, no network, no AI.
 //
 // Per scene a 1920×1080 segment: app clip inside the stage frame, lower-third caption, "sped up"
 // badge during sped-up waits (or a card). Segments are joined with short crossfades; each
 // narration starts T.lead after its segment starts, and a segment is never shorter than
-// lead + narration + tail, so narrations cannot be cut or overlap. Loudness: two-pass loudnorm
+// lead + narration + tail (or the scene's minLen: the title card holds 17 s so both facts can be
+// read), so narrations cannot be cut or overlap. A scene without narration (s11) lasts its clip. Loudness: two-pass loudnorm
 // to -16 LUFS. Output: H.264 yuv420p 30 fps + AAC 48 kHz.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cardPng } from "./cards.mjs";
+import { checkIdle } from "./check-idle.mjs";
 import {
-  DIRS, FPS, OUT, RUN_STATE, STAGE, T, TTS_MANIFEST, duration, ensureDirs, ffmpeg, loadScenes, log, readJson, sentenceCues, sentenceStarts, sha,
+  DIRS, FPS, OUT, RUN_STATE, STAGE, T, TTS_MANIFEST, duration, ensureDirs, ffmpeg, hasVoice, loadScenes, log, readJson, sentenceCues, sentenceStarts, sha,
   variantFor, voiceText, writeJson,
 } from "./lib.mjs";
 
-const SEG_VERSION = "seg-v6";
+const SEG_VERSION = "seg-v7";
+export const VIDEO_NAME = "ribbon-demo";
 const END_HOLD = 2.4; // end card stays after the tagline
 const FADE_OUT = 1.0;
 
@@ -36,8 +39,8 @@ export function plan() {
   let t = 0;
   for (const [i, s] of cfg.scenes.entries()) {
     const variant = variantFor(s, state);
-    const n = tts[s.id]?.[variant] ?? tts[s.id]?.main;
-    if (!n || !existsSync(n.file)) throw new Error(`No narration for ${s.id}; run TTS first.`);
+    const n = hasVoice(s) ? (tts[s.id]?.[variant] ?? tts[s.id]?.main) : { file: null, dur: 0, model: null };
+    if (!n || (hasVoice(s) && !existsSync(n.file))) throw new Error(`No narration for ${s.id}; run TTS first.`);
     let clip = null;
     let base = 0;
     if (s.type === "app") {
@@ -48,7 +51,7 @@ export function plan() {
       base = clip.dur + (s.prefixCard ? T.titleCard - T.titleXfade : 0);
     }
     const lead = T.lead + (s.voiceDelay ?? 0);
-    const need = lead + n.dur + T.tail + (s.id === "s12" ? END_HOLD : 0);
+    const need = hasVoice(s) ? Math.max(s.minLen ?? 0, lead + n.dur + T.tail + (s.id === "s12" ? END_HOLD : 0)) : 0;
     const len = Math.max(base, need);
     const start = i === 0 ? 0 : t - T.xfade;
     segs.push({ scene: s, variant, narr: n, clip, len, start, lead, padded: Math.max(0, len - base) * (s.type === "app" ? 1 : 0) });
@@ -121,6 +124,17 @@ export function buildCardSegment(seg, out) {
     f.push(`[a0][a1]xfade=transition=fade:duration=${XF}:offset=${fmt(t1)}[x1]`);
     f.push(`[x1][a2]xfade=transition=fade:duration=${XF}:offset=${fmt(t2)}[x2]`);
     f.push(`[x2]trim=duration=${fmt(len)}[out]`);
+  } else if (s.pushIn) {
+    // Slow camera push-in from pushIn.from seconds: the card is upscaled 2x first so zoompan's
+    // integer crop steps are half-pixels at the output size (no visible jitter).
+    const { from = 3, scale = 1.04 } = s.pushIn;
+    const rate = (scale - 1) / Math.max(1, len - from);
+    inputs.push("-loop", "1", "-framerate", String(FPS), "-t", fmt(len), "-i", cardPng(s.card));
+    f.push(
+      `[0:v]scale=${STAGE.W * 2}:${STAGE.H * 2}:flags=lanczos,` +
+        `zoompan=z='if(lt(in_time,${from}),1,1+(in_time-${from})*${rate.toFixed(6)})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${STAGE.W}x${STAGE.H}:fps=${FPS},` +
+        `format=yuv420p,setsar=1,trim=duration=${fmt(len)}[out]`,
+    );
   } else {
     inputs.push("-loop", "1", "-framerate", String(FPS), "-t", fmt(len), "-i", cardPng(s.card));
     f.push(`[0:v]format=yuv420p,setsar=1,trim=duration=${fmt(len)}[out]`);
@@ -192,6 +206,7 @@ export async function compose() {
     if (seg.clip?.marks?.paypal?.length) keyParts.push(pngKey("frame-paypal"));
     if (s.caption) keyParts.push(pngKey(`caption-${s.id}`));
     if (s.prefixCard) keyParts.push(pngKey(s.prefixCard));
+    if (s.pushIn) keyParts.push(JSON.stringify(s.pushIn));
     if (s.card === "arch") keyParts.push(pngKey("arch-1"), pngKey("arch-2"), pngKey("arch-3"), fmt(seg.narr.dur));
     else if (s.card) keyParts.push(pngKey(s.card));
     const key = sha(keyParts.join("|"));
@@ -206,12 +221,13 @@ export async function compose() {
   // 2. Narration track: each WAV at its segment start + lead, two-pass loudnorm to -16 LUFS.
   const mixIn = [];
   const mixF = [];
-  segs.forEach((seg, i) => {
+  const voiced = segs.filter((seg) => seg.narr.file);
+  voiced.forEach((seg, i) => {
     mixIn.push("-i", seg.narr.file);
     const ms = Math.round((seg.start + seg.lead) * 1000);
     mixF.push(`[${i}:a]aresample=48000,afade=t=in:d=0.02,afade=t=out:st=${fmt(Math.max(0, seg.narr.dur - 0.04))}:d=0.04,adelay=${ms}:all=1[n${i}]`);
   });
-  mixF.push(`${segs.map((_, i) => `[n${i}]`).join("")}amix=inputs=${segs.length}:normalize=0:dropout_transition=0,apad=whole_dur=${fmt(total)},atrim=duration=${fmt(total)}[mix]`);
+  mixF.push(`${voiced.map((_, i) => `[n${i}]`).join("")}amix=inputs=${voiced.length}:normalize=0:dropout_transition=0,apad=whole_dur=${fmt(total)},atrim=duration=${fmt(total)}[mix]`);
   const rawMix = join(DIRS.segments, "narration-mix.wav");
   ffmpeg([...mixIn, "-filter_complex", mixF.join(";") + ";[mix]pan=stereo|c0=c0|c1=c0[st]", "-map", "[st]", "-c:a", "pcm_s16le", rawMix]);
   const m = JSON.parse(/\{[\s\S]*?\}/.exec(measureStderr(rawMix))?.[0] ?? "null");
@@ -236,7 +252,7 @@ export async function compose() {
     acc = off + segs[i].len;
   }
   vf.push(`${last}fade=t=in:st=0:d=0.35,fade=t=out:st=${fmt(total - FADE_OUT)}:d=${FADE_OUT},format=yuv420p[v]`);
-  const mp4 = join(OUT, "allowance-demo.mp4");
+  const mp4 = join(OUT, `${VIDEO_NAME}.mp4`);
   vin.push("-i", narration);
   log("  final encode");
   ffmpeg([
@@ -251,8 +267,10 @@ export async function compose() {
   ]);
 
   // 4. Subtitles.
-  const cues = segs.flatMap((seg) => srtCues(voiceText(seg.scene, seg.variant), seg.start + seg.lead, seg.narr.dur));
-  writeFileSync(join(OUT, "allowance-demo.srt"), cues.map((c, i) => `${i + 1}\n${srtTime(c.a)} --> ${srtTime(c.b)}\n${c.text}\n`).join("\n"));
+  // Spoken words only: voiceText() strips every [audio tag].
+  const cues = segs.filter((seg) => seg.narr.file).flatMap((seg) => srtCues(voiceText(seg.scene, seg.variant), seg.start + seg.lead, seg.narr.dur));
+  if (cues.some((c) => /[[\]]/.test(c.text))) throw new Error("An audio tag reached the subtitles.");
+  writeFileSync(join(OUT, `${VIDEO_NAME}.srt`), cues.map((c, i) => `${i + 1}\n${srtTime(c.a)} --> ${srtTime(c.b)}\n${c.text}\n`).join("\n"));
 
   // 5. Review stills, one per scene, near the end of each segment (the result on screen); "s03@paypal"
   // is the last moment of PayPal's own approval page in scene 3.
@@ -295,6 +313,8 @@ export async function compose() {
   console.table(rows);
   log(`Wrote ${mp4} (${final.toFixed(2)} s = ${Math.floor(final / 60)}:${String(Math.round(final % 60)).padStart(2, "0")})`);
   if (bad.length) throw new Error(`Narration overlap or cut in ${bad.map((r) => r.id).join(", ")}`);
+  const idle = checkIdle(mp4, { total: final });
+  writeJson(join(OUT, "timing.json"), { total: final, rows, idle: idle.idle });
   if (final < 150 || final > 178) log(`WARNING: duration ${final.toFixed(1)} s is outside 2:30–2:58.`);
   return { mp4, total: final, rows };
 }

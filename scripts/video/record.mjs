@@ -1,44 +1,54 @@
-// Drives the running app through the demo and records one clip per app scene (clips/<id>.mp4).
+// Drives the running app through the Ribbon demo and records one clip per app scene (clips/<id>.mp4).
 //
-// One fresh browser session runs scenes s01 → s11 in order (each scene needs the state the one
-// before left behind). Only the selected scenes are recorded; the others still run, quickly, so
-// the state is right. Each clip lasts at least its narration (lead + voiceover + tail), with
-// actions synced to sentence cues, AI waits sped up and AI cooldowns cut.
+// One fresh browser session runs the app scenes s02 → s11 in order (each scene needs the state the
+// one before left behind). Only the selected scenes are recorded; the others still run, quickly, so
+// the state is right. Each clip lasts at least its narration (lead + voiceover + tail), with actions
+// synced to the spoken phrases (ElevenLabs alignment, lib.phraseAt), AI waits sped up and AI
+// cooldowns cut.
 //
-// AI calls: Draft with AI (1), P1, robot vacuum, P2, return = 5 chat turns (each one or more
-// model steps). A chat prompt is never resent inside a take (that would leave two identical user
-// bubbles): if a turn fails, or P2 is bought without asking, the whole take restarts in a fresh
-// browser session (new app session, new PayPal authorization), up to MAX_TAKES (default 3).
-// A cooldown between AI calls (AI_COOLDOWN, default 25 s) is cut from the clips.
+// AI calls: Draft with AI (1), "Shop my whole gift list" (1 turn, several model steps), "Return
+// Sam's gift" (1). A chat prompt is never resent inside a take (that would leave two identical user
+// bubbles). The take restarts in a fresh browser session (new app session, new PayPal authorization),
+// up to MAX_TAKES (default 3), when: a turn fails, the draft does not have the five people, the agent
+// bought Mom's gift without asking (the script needs it over $45, waiting for an OK), or Sam got no
+// gift to return. A cooldown between AI calls (AI_COOLDOWN, default 45 s: Groq allows 8K tokens a
+// minute) is cut from the clips.
 //
-// Scene 3 runs the real PayPal sandbox approval (scripts/video/paypal.mjs) with the visible
-// cursor; PayPal's page loads are jump cuts, and the clip marks the PayPal interval so compose
-// shows PayPal's host in the window's URL bar meanwhile.
+// Scene 3 runs the real PayPal sandbox approval (scripts/video/paypal.mjs) with the visible cursor;
+// PayPal's page loads are jump cuts, and the clip marks the PayPal interval so compose shows PayPal's
+// host in the window's URL bar meanwhile.
+//
+// Dry run without AI or PayPal: REC_FIXTURE=1 drives the app's ?fixture=1 mode (an active gift list
+// with canned data) through the scenes that need neither (s06-s11) and records them into the cache, to
+// test the recorder's selectors and timing. Those clips are not for the video: run the real pipeline after.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import puppeteer from "puppeteer-core";
 import { approveOnPayPal, loadBuyerEnv, onPayPal } from "./paypal.mjs";
 import { Recorder } from "./recorder.mjs";
 import {
-  BASE_URL, DIRS, HERE, ROOT, RUN_STATE, STAGE, T, bumpUsage, ensureDirs, findChrome, loadScenes, log, minClipFor,
-  narrationDur, readJson, sentenceStarts, sleep, variantFor, voiceText, writeJson,
+  BASE_URL, DIRS, HERE, ROOT, RUN_STATE, STAGE, T, bumpUsage, ensureDirs, findChrome, hasVoice, loadScenes, log, minClipFor,
+  narrationDur, phraseAt, readJson, sentenceStarts, sleep, variantFor, writeJson,
 } from "./lib.mjs";
 
-const TURN_TIMEOUT = 75_000;
-const COOLDOWN = Number(process.env.AI_COOLDOWN ?? 25) * 1000;
+const TURN_TIMEOUT = 150_000;
+const COOLDOWN = Number(process.env.AI_COOLDOWN ?? 45) * 1000;
 const MAX_TAKES = Number(process.env.MAX_TAKES ?? 3);
+const ASK_OVER = 45; // the demo list's ask-me threshold
+const FIXTURE = process.env.REC_FIXTURE === "1";
+const FIXTURE_SKIP = new Set(["s02", "s03", "s04", "s05"]); // they need the AI or PayPal
 
-/** A take that must restart from a fresh session (failed chat turn, unexpected card). */
+/** A take that must restart from a fresh session (failed chat turn, unexpected outcome). */
 class Retake extends Error {}
 
 export async function record({ only } = {}) {
-  const carry = {}; // what a retake should do differently (e.g. the $90 P2 prompt)
+  const carry = {};
   for (let take = 1; ; take++) {
     try {
       return await recordTake({ only, take, carry });
     } catch (e) {
       if (!(e instanceof Retake) || take >= MAX_TAKES) throw e;
-      const wait = /rate|limit|busy|overloaded/i.test(e.message) ? 75 : 10;
+      const wait = 75;
       log(`Take ${take} discarded: ${e.message}. Starting take ${take + 1} in a fresh session in ${wait} s.`);
       await sleep(wait * 1000);
     }
@@ -54,13 +64,15 @@ async function recordTake({ only, take, carry }) {
   const lastNeeded = Math.max(...appScenes.map((s, i) => (selected.has(s.id) ? i : -1)));
   if (lastNeeded < 0) throw new Error(`No app scene matches ${[...selected].join(", ")}`);
   const prevState = readJson(RUN_STATE(), {});
-  const state = { ...prevState, recordedAt: new Date().toISOString(), base: BASE_URL, take, notes: [] };
+  const state = { ...prevState, recordedAt: new Date().toISOString(), base: BASE_URL, take, notes: [], turns: [] };
+  carry.discarded ??= [];
+  state.discardedTakes = carry.discarded;
 
   const health = await fetch(`${BASE_URL}/healthz`).then((r) => r.ok).catch(() => false);
-  if (!health) throw new Error(`The app is not answering at ${BASE_URL}/healthz. Start it first (see the header of scripts/video/run.mjs).`);
+  if (!health) throw new Error(`The app is not answering at ${BASE_URL}/healthz. Wake it first (see the header of scripts/video/run.mjs).`);
   const mode = await fetch(`${BASE_URL}/api/state`).then((r) => r.json()).catch(() => null);
   state.mode = mode?.mode ?? null;
-  log(`App at ${BASE_URL}: payments=${mode?.mode?.payment} products=${mode?.mode?.products} ai=${mode?.mode?.ai}`);
+  log(`Take ${take}. App at ${BASE_URL}: payments=${mode?.mode?.payment} products=${mode?.mode?.products} ai=${mode?.mode?.ai}`);
 
   const browser = await puppeteer.launch({
     executablePath: findChrome(),
@@ -89,6 +101,7 @@ async function recordTake({ only, take, carry }) {
       return { x: r.left + r.width / 2, y: r.top + r.height / 2, top: r.top, bottom: r.bottom, left: r.left, right: r.right, w: r.width, h: r.height, width: r.width, height: r.height };
     }, el);
 
+  /** The last (or first) element matching sel, optionally containing text, optionally inside the last `within`. */
   async function el(sel, { text, last = true, within } = {}) {
     const h = await page.evaluateHandle(
       (sel, text, last, within) => {
@@ -105,6 +118,7 @@ async function recordTake({ only, take, carry }) {
     if (!e) throw new Error(`No element ${sel}${text ? ` with "${text}"` : ""}`);
     return e;
   }
+  const maybe = (sel, opts) => el(sel, opts).catch(() => null);
 
   let cursorPos = { x: 1180, y: 640 };
   async function moveTo(target, { dx = 0, dy = 0, ms } = {}) {
@@ -112,7 +126,7 @@ async function recordTake({ only, take, carry }) {
     const x = Math.round(p.x + dx);
     const y = Math.round(p.y + dy);
     cursorPos = { x, y };
-    await page.evaluate((x, y, ms) => window.__rec.moveTo(x, y, ms), x, y, ms ?? null);
+    await page.evaluate((x, y, ms) => window.__rec.moveTo(x, y, ms), x, y, rec.on ? (ms ?? null) : 1);
     await page.mouse.move(x, y);
   }
 
@@ -175,6 +189,7 @@ async function recordTake({ only, take, carry }) {
       await pause(150);
     }
   }
+  const scrollTop = (ms = 900) => page.evaluate((ms) => window.__rec.scrollByPx(-1e5, ms), rec.on ? ms : 1);
 
   async function waitFor(fn, timeout) {
     const end = Date.now() + timeout;
@@ -187,8 +202,10 @@ async function recordTake({ only, take, carry }) {
   const count = (sel) => page.$$eval(sel, (n) => n.length);
   const exists = (sel) => page.$(sel).then(Boolean);
   const isBusy = () => page.evaluate(() => [...document.querySelectorAll(".composer button")].some((b) => b.textContent?.trim() === "Stop"));
+  const apiState = () => page.evaluate(() => fetch("/api/state", { credentials: "same-origin" }).then((r) => r.json()));
 
   async function cooldown() {
+    if (FIXTURE) return;
     const left = COOLDOWN - (Date.now() - lastAi);
     if (left > 0) {
       log(`  AI cooldown ${Math.round(left / 1000)} s${rec.on ? " (cut)" : ""}`);
@@ -196,11 +213,19 @@ async function recordTake({ only, take, carry }) {
     }
   }
 
+  /** Which model answered the last chat turn (the server's mode.ai_active). */
+  async function noteModel(label) {
+    const s = await apiState().catch(() => null);
+    const model = s?.mode?.ai_active ?? null;
+    state.turns.push({ label, model });
+    log(`  ${label}: answered by ${model ?? "? (not reported by the API)"}`);
+  }
+
   /**
    * Sends a chat turn once and waits (sped up) for a new card matching doneSel. A failed turn
    * discards the take (Retake): resending would leave two identical user bubbles on screen.
    */
-  async function chatTurn(label, send, doneSel) {
+  async function chatTurn(label, send, doneSel, { max } = {}) {
     await cooldown();
     const before = await count(doneSel);
     log(`  ${label}: sending`);
@@ -209,30 +234,34 @@ async function recordTake({ only, take, carry }) {
     await send();
     let outcome = "timeout";
     const started = Date.now();
-    await rec.fast(async () => {
-      // A card can settle only after the turn ends: the refund card reads "Refund not completed"
-      // until the app state refreshes. So an idle composer gets a grace period before giving up.
-      let idleSince = null;
-      while (Date.now() - started < TURN_TIMEOUT) {
-        await sleep(500);
-        const busy = await isBusy();
-        if ((await count(doneSel)) > before && !busy) {
-          outcome = "ok";
-          break;
+    await rec.fast(
+      async () => {
+        // A card can settle only after the turn ends (the refund card reads "Refund not completed"
+        // until the app state refreshes), so an idle composer gets a grace period before giving up.
+        let idleSince = null;
+        while (Date.now() - started < TURN_TIMEOUT) {
+          await sleep(500);
+          const busy = await isBusy();
+          if ((await count(doneSel)) > before && !busy) {
+            outcome = "ok";
+            break;
+          }
+          if (await exists(".chat-error")) {
+            outcome = "error: " + (await page.$eval(".chat-error span", (n) => n.textContent).catch(() => "?"));
+            break;
+          }
+          idleSince = busy ? null : (idleSince ?? Date.now());
+          if (idleSince && Date.now() - started > 4000 && Date.now() - idleSince > 6000) {
+            outcome = "ended without the expected card";
+            break;
+          }
         }
-        if (await exists(".chat-error")) {
-          outcome = "error: " + (await page.$eval(".chat-error span", (n) => n.textContent).catch(() => "?"));
-          break;
-        }
-        idleSince = busy ? null : (idleSince ?? Date.now());
-        if (idleSince && Date.now() - started > 4000 && Date.now() - idleSince > 6000) {
-          outcome = "ended without the expected card";
-          break;
-        }
-      }
-      await sleep(600); // let the last tokens and the meter settle
-    });
+        await sleep(700); // let the last tokens, the meter and the chat's own scroll settle
+      },
+      { max },
+    );
     lastAi = Date.now();
+    await noteModel(label);
     if (outcome !== "ok") throw new Retake(`${label}: ${outcome}`);
     log(`  ${label}: done in ${Math.round((Date.now() - started) / 1000)} s`);
     return true;
@@ -245,27 +274,35 @@ async function recordTake({ only, take, carry }) {
     if (dup) throw new Retake(`duplicated user bubble "${dup.slice(0, 60)}"`);
   }
 
-  /** The real rail is on screen: no MOCK text, the authorization footer. */
+  /** The real rail is on screen: no MOCK or FIXTURE text, the authorization footer. */
   async function assertReal(id) {
-    if (onPayPal(page)) return;
+    if (onPayPal(page) || FIXTURE) return;
     const t = await page.evaluate(() => document.body.innerText);
-    if (/MOCK/.test(t)) throw new Error(`${id}: MOCK text on screen; record against the PAYMENT_MODE=authorization app.`);
+    if (/MOCK|FIXTURE/.test(t)) throw new Error(`${id}: MOCK or FIXTURE text on screen; record against the PAYMENT_MODE=authorization app.`);
     if (!/PayPal sandbox \(authorization\)/.test(t)) throw new Error(`${id}: the footer does not read "PayPal sandbox (authorization)".`);
-  }
-
-  async function clickChip(text) {
-    await click(await el("button.chip-suggest", { text }));
   }
 
   async function nav(label) {
     await click(await el(".nav a", { text: label }));
     await page.waitForFunction((l) => document.querySelector(".nav a.active")?.textContent?.trim() === l, {}, label);
-    await sleep(rec.on ? 500 : 200);
+    await sleep(rec.on ? 450 : 200);
   }
 
-  async function waitToastGone() {
-    await waitFor(async () => !(await exists(".toast")), 9000);
-  }
+  /** A row of the last Gift plan card, by person. */
+  const planRow = (name) =>
+    page.evaluateHandle(
+      (name) => [...([...document.querySelectorAll(".msg-agent .gift-plan")].at(-1)?.querySelectorAll(".gp-row") ?? [])].find((r) => r.querySelector(".gp-who strong")?.textContent.trim() === name) ?? null,
+      name,
+    ).then((h) => h.asElement());
+  const rowInfo = (row) =>
+    row
+      ? row.evaluate((r) => ({
+          kind: [...r.classList].find((c) => c.startsWith("gp-") && c !== "gp-row") ?? "?",
+          gift: r.querySelector(".gp-gift")?.textContent ?? null,
+          price: r.querySelector(".gp-price")?.textContent ?? null,
+          capture: r.querySelector(".pp-id code")?.textContent ?? null,
+        }))
+      : { kind: "missing" };
 
   /**
    * PayPal sandbox approval with the visible cursor: email, password, the "Pay with" page (held
@@ -282,8 +319,8 @@ async function recordTake({ only, take, carry }) {
       async type(_page, h, text, { secret } = {}) {
         await h.evaluate((e) => e.scrollIntoView({ block: "nearest", behavior: "instant" }));
         await click(h);
-        await type(text, secret ? { min: 30, max: 50 } : { min: 10, max: 20 });
-        await pause(200);
+        await type(text, secret ? { min: 25, max: 40 } : { min: 8, max: 16 });
+        await pause(150);
       },
       async wait(fn) {
         const r = await rec.cut(fn);
@@ -301,8 +338,8 @@ async function recordTake({ only, take, carry }) {
         if (kind === "email" || kind === "password" || kind === "submit") rec.markStart("paypal");
         if (kind === "email") await pause(250);
         if (kind === "submit") {
-          await pause(400);
-          const amount = await page.evaluateHandle(() => [...document.querySelectorAll("span, p, div")].find((n) => n.children.length === 0 && /\$150\.00/.test(n.textContent)) ?? null);
+          await pause(300);
+          const amount = await page.evaluateHandle(() => [...document.querySelectorAll("span, p, div")].find((n) => n.children.length === 0 && /\$200\.00/.test(n.textContent)) ?? null);
           if (amount.asElement()) await pointAt(amount.asElement(), { ms: 600 });
           await pause(holdReview);
         }
@@ -320,15 +357,24 @@ async function recordTake({ only, take, carry }) {
     const variant = variantFor(scene, state);
     const narr = narrationDur(id, variant);
     if (narr == null) throw new Error(`No narration for ${id}; run TTS first (npm run video -- --tts-only).`);
-    const text = voiceText(scene, variant);
-    const offset = scene.prefixCard ? T.titleCard - T.titleXfade : 0; // clip starts this far into the segment
-    const cues = sentenceStarts(scene, variant).map((t) => T.lead + (scene.voiceDelay ?? 0) + t - offset);
-    return { min: minClipFor(scene, narr), cues, narr };
+    const lead = T.lead + (scene.voiceDelay ?? 0);
+    const cues = sentenceStarts(scene, variant).map((t) => lead + t);
+    /** Clip time at which `phrase` is spoken (the scene's narration starts `lead` into the clip). */
+    const at = (phrase, opts) => {
+      const t = phraseAt(scene, phrase, { variant, ...opts });
+      if (t == null) {
+        log(`  WARN ${id}: phrase "${phrase}" not in the narration`);
+        return 0;
+      }
+      return lead + t;
+    };
+    return { min: minClipFor(scene, narr), cues, narr, at };
   }
 
   async function scene(id, fn) {
     const idx = appScenes.findIndex((s) => s.id === id);
     if (idx > lastNeeded) return false;
+    if (FIXTURE && FIXTURE_SKIP.has(id)) return false;
     const on = selected.has(id);
     const t = timing(id);
     // A closing beat that never makes the clip longer than its narration needs.
@@ -337,6 +383,7 @@ async function recordTake({ only, take, carry }) {
       const left = t.min - rec.elapsed();
       if (left > 0) await sleep(Math.min(ms, left * 1000));
     };
+    t.until = (s) => rec.until(s);
     log(`Scene ${id}${on ? "" : " (not recorded)"}: narration ${t.narr.toFixed(1)} s, clip ≥ ${t.min.toFixed(1)} s`);
     if (on) await rec.start(id);
     await fn(t);
@@ -350,382 +397,379 @@ async function recordTake({ only, take, carry }) {
     }
     return true;
   }
+  const ran = (id) => appScenes.findIndex((x) => x.id === id) <= lastNeeded;
 
   // ------------------------------------------------------------------ the demo
 
   try {
-    await page.goto(`${BASE_URL}/mandate`, { waitUntil: "networkidle0" });
-    await page.waitForSelector("#rule");
+    if (FIXTURE) {
+      await page.goto(`${BASE_URL}/agent?fixture=1`, { waitUntil: "networkidle0" });
+      await page.waitForSelector(".composer input");
+    } else {
+      await page.goto(`${BASE_URL}/mandate`, { waitUntil: "networkidle0" });
+      await page.waitForSelector("#rule");
+      const prefilled = await page.$eval("#rule", (n) => n.value);
+      if (prefilled.trim() !== P.giftList) throw new Error("The Gift list textarea does not hold the demo list from GIFTLIST_SPEC §2.");
+    }
     await page.evaluate(() => document.fonts.ready);
     await sleep(600);
 
-    // s01: empty mandate page, push in on the empty meter, pull back for "a mandate".
-    await scene("s01", async ({ cues }) => {
-      await pause(700);
-      const meter = await el(".meter");
-      await moveTo(meter, { dx: -70, dy: 52, ms: 1400 });
-      await pause(300);
-      await page.evaluate(() => window.__rec.cursorVisible(false));
-      const r = await center(meter);
-      await page.evaluate((r, ms) => window.__rec.zoomTo(r, 1.85, ms), r, rec.on ? 3200 : 1);
-      await rec.until(cues[4] - 1.2); // "Allowance is a third option: a mandate."
-      await page.evaluate((ms) => window.__rec.zoomReset(ms), rec.on ? 1500 : 1);
-      await pause(1600);
-      await page.evaluate(() => window.__rec.cursorVisible(true));
-      await moveTo({ x: 1290, y: 330 }, { ms: 1200 });
-    });
-
-    // s02: plain-language rule → Draft with AI → review the structured mandate.
-    await scene("s02", async ({ cues }) => {
+    // s02: the demo list → Draft with AI → five envelopes in the review.
+    await scene("s02", async ({ at, until, hold }) => {
       const rule = await el("#rule");
       const rr = await center(rule);
-      await moveTo({ x: rr.left + 40, y: rr.top + 34 }, { ms: 900 });
-      await moveTo({ x: rr.left + 520, y: rr.top + 34 }, { ms: 1700 });
-      await moveTo({ x: rr.left + 260, y: rr.top + 62 }, { ms: 1300 });
-      await rec.until(cues[1] - 3.2);
-      let ok = false;
-      for (let attempt = 1; attempt <= 2 && !ok; attempt++) {
-        await cooldown();
-        log(`  Draft with AI (attempt ${attempt})`);
-        aiCalls++;
-        bumpUsage("app_ai_turns");
-        await click(await el("button", { text: "Draft with AI" }));
-        await rec.fast(async () => {
-          ok = await waitFor(() => exists(".review .form-grid"), 60_000);
-          await waitFor(async () => !(await page.evaluate(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.includes("Drafting")))), 30_000);
-          await sleep(400);
-        });
-        lastAi = Date.now();
+      await moveTo({ x: rr.left + 30, y: rr.top + 34 }, { ms: 700 });
+      await moveTo({ x: rr.left + rr.w * 0.8, y: rr.top + 34 }, { ms: 1100 });
+      const draftBtn = await el("button", { text: "Draft with AI" });
+      await moveTo(draftBtn, { ms: 600 });
+      await until(Math.max(0, at("Two hundred") - 2.4));
+      await cooldown();
+      log("  Draft with AI");
+      aiCalls++;
+      bumpUsage("app_ai_turns");
+      await click(draftBtn);
+      await rec.fast(async () => {
+        await waitFor(() => exists(".review .rcp-row"), 60_000);
+        await waitFor(async () => !(await page.evaluate(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.includes("Drafting")))), 30_000);
+        await sleep(400);
+      });
+      lastAi = Date.now();
+      state.turns.push({ label: "draft", model: null });
+      const people = await page.$$eval(".review .rcp-row", (rows) => rows.map((r) => `${r.querySelector(".rcp-name input").value} $${r.querySelector(".rcp-env input").value}`));
+      log(`  draft: ${people.join(", ") || "no people"}`);
+      if (people.length !== 5) throw new Retake(`the draft has ${people.length} people, not 5`);
+      state.draft = people;
+      const rcp = await el(".review .rcp");
+      await frameSpan(rcp, rcp, { ms: 1100 });
+      await pointAt(await el(".review .rcp-total strong"), { ms: 600 });
+      const rows = await page.$$(".review .rcp-row");
+      const marks = ["Mom sixty", "Dad fifty", "Leo", "Sam", "Secret Santa"];
+      for (const [i, row] of rows.entries()) {
+        await until(at(marks[i]) - 0.25);
+        const env = await row.$(".rcp-env");
+        await moveTo(env, { dx: 30, dy: 2, ms: 450 });
       }
-      if (!ok) throw new Error("The mandate draft never appeared.");
-      const review = await el(".review");
-      await frameSpan(review, await el(".review .review-actions"), { align: "top", ms: 1200 });
-      await moveTo(await el(".review .field", { text: "Total budget" }), { dy: 6, ms: 900 });
-      await pause(500);
-      await moveTo(await el(".review .field", { text: "Ask me above" }), { dy: 6 });
-      await pause(400);
-      await moveTo(await el(".review .field", { text: "Max quantity" }), { dy: 6 });
-      await pause(400);
-      await moveTo(await el(".review .cat-picker"), { dy: 30 });
-      await rec.until(cues[1] + 1.8); // "… and I can change every field"
-      const budgetInput = await (await el(".review .field", { text: "Total budget" })).$("input");
-      if (budgetInput) await click(budgetInput);
-      await pause(900);
-      await moveTo(await el(".review fieldset", { text: "Always blocked" }), { dy: 18 });
+      await until(at("Ask me") - 0.9);
+      const askField = await el(".review .field", { text: "Ask me above" });
+      await frameSpan(askField, await el(".review .cat-picker"), { ms: 900 });
+      await moveTo(await askField.$("input"), { dx: 40, ms: 500 });
+      await until(at("no electronics") - 0.3);
+      const elec = await page.evaluateHandle(() => [...document.querySelectorAll(".review .cat-picker fieldset")].at(-1)?.querySelector(".chip.on-block") ?? null);
+      if (elec.asElement()) await pointAt(elec.asElement(), { ms: 600 });
+      await until(at("Gemini") - 0.5);
+      await frameSpan(rcp, rcp, { ms: 900 });
+      await until(at("change any") - 0.4);
+      await click(await rows[0].$(".rcp-env input"));
+      await hold(1200);
     });
 
-    // s03: Approve with PayPal → the real sandbox login and approval → the active mandate.
-    await scene("s03", async ({ hold }) => {
-      const approve = await el("button.btn-paypal", { text: "Approve with PayPal" });
+    // s03: Approve $200.00 with PayPal → the real sandbox login and approval → the active gift list.
+    await scene("s03", async ({ at, until, hold }) => {
+      const approve = await el("button.btn-paypal", { text: "with PayPal" });
       await frameSpan(approve, approve, { align: "center", ms: 500 });
-      await pause(100);
       await click(approve);
       await rec.cut(() => waitFor(async () => onPayPal(page) || page.url().includes("/agent"), 45_000));
-      if (onPayPal(page)) await paypalApprove({ holdReview: 800 });
-      else state.notes.push("s03: the app did not open PayPal (mock rail?).");
+      if (!onPayPal(page)) throw new Error("The app did not open PayPal (mock rail?).");
+      await paypalApprove({ holdReview: 900 });
       await rec.cut(async () => {
         const ok = await waitFor(() => page.evaluate(() => !!document.querySelector(".meter .pill-active")), 45_000);
-        if (!ok) throw new Error("The mandate never became active after Approve with PayPal.");
+        if (!ok) throw new Error("The gift list never became active after the PayPal approval.");
         await page.waitForNetworkIdle({ idleTime: 400, timeout: 15_000 }).catch(() => {});
-        // PayPal returns to /agent; cut straight to the active mandate.
+        // PayPal returns to /agent; cut straight to the active gift list.
         if (!(await exists(".mandate-card"))) {
-          await page.evaluate(() => [...document.querySelectorAll(".nav a")].find((a) => a.textContent.trim() === "Mandate")?.click());
-          await page.waitForSelector(".mandate-card", { timeout: 15_000 });
-          await sleep(400);
+          await page.evaluate(() => [...document.querySelectorAll(".nav a")].find((a) => a.textContent.trim() === "Gift list")?.click());
+          await page.waitForSelector(".env-rows", { timeout: 15_000 });
+          await sleep(500);
         }
+        await page.evaluate(() => (document.scrollingElement.scrollTop = 0));
+        await sleep(200);
       });
       await rec.restartCast();
       await page.evaluate((p) => window.__rec?.place(p.x, p.y), cursorPos).catch(() => {});
-      await page.waitForSelector(".mandate-card");
-      await pause(150);
+      await page.waitForSelector(".env-rows");
       await moveTo(await el(".page-head .pill"), { dx: 30, dy: 8, ms: 450 });
-      await pause(250);
-      await moveTo(await el(".budget-hero .hero-num"), { dx: 60, dy: 4, ms: 450 });
-      await pause(250);
-      await moveTo(await el(".rules dt", { text: "Spending power" }), { dx: 40, dy: 22, ms: 500 });
-      await hold(700);
-      const auth = await page.$$(".rules dt").then(async (ds) => {
-        for (const d of ds) if ((await d.evaluate((n) => n.textContent)) === "PayPal authorization") return d;
-        return null;
-      });
-      if (auth) {
-        await moveTo(auth, { dx: 60, dy: 22, ms: 500 });
-        await hold(1500);
-      }
-    });
-    state.authorizationId = await page.evaluate(() => [...document.querySelectorAll(".rules dt")].find((d) => d.textContent === "PayPal authorization")?.nextElementSibling?.textContent?.trim() ?? null).catch(() => null);
-    state.mandateMode = await page.evaluate(() => [...document.querySelectorAll(".rules dt")].find((d) => d.textContent === "Spending power")?.nextElementSibling?.textContent ?? null).catch(() => null);
-
-    // s04: delegate a purchase.
-    await scene("s04", async ({ cues, hold }) => {
-      await click(await el("button", { text: "Talk to the agent" }));
-      await page.waitForSelector(".composer input");
-      await pause(500);
-      await click(await el(".composer input"));
-      await chatTurn(
-        "P1",
-        async () => {
-          await page.evaluate(() => (document.querySelector(".composer input").value = ""));
-          await type(P.P1);
-          await pause(300);
-          await page.keyboard.press("Enter");
-        },
-        ".msg-agent:not(.msg-sim) .receipt, .msg-agent:not(.msg-sim) .approval",
-      );
-      const card = await el(".msg-agent:not(.msg-sim) .receipt, .msg-agent:not(.msg-sim) .approval");
-      const strip = (await page.$$(".products-card")).at(-1);
-      if (strip) {
-        await frameSpan(strip, strip, { align: "top", ms: 1100 });
-        const sr = await center(strip);
-        await moveTo({ x: sr.right - 150, y: sr.top + 24 }, { ms: 800 });
-        await pause(500);
-        await moveTo({ x: sr.left + sr.w * 0.55, y: sr.top + sr.h * 0.6 }, { ms: 1500 });
-      }
-      await rec.until(cues[2] - 0.6); // "Before any PayPal call, a policy engine checked the mandate."
-      await frameSpan(card, card, { ms: 1100 });
-      await pointAt(await el(".card-banner", { within: ".msg-agent:not(.msg-sim) .purchase-card" }), { side: "right" });
-      await pause(800);
-      if (await page.evaluate((c) => c.classList.contains("approval"), card)) {
-        state.notes.push("s04: the agent asked for approval instead of buying; approved on camera.");
-        await click(await el(".approval .card-actions .btn-primary"));
-        await waitFor(() => exists(".toast"), 10_000);
-      }
-      const why = await page.$(".msg-agent:not(.msg-sim) .receipt .rationale");
-      await rec.until(cues[4] - 0.3); // "Every receipt says why the agent chose it."
-      if (why) await pointAt(why);
-      await hold(1600);
-      await moveTo(await el(".meter"), { dy: 10 });
-      await hold(800);
-    });
-    const ranS04 = appScenes.findIndex((x) => x.id === "s04") <= lastNeeded;
-    if (ranS04) state.flagged = await exists(".flag-card");
-    if (ranS04) log(`  injection flag card: ${state.flagged ? "yes" : "no"}`);
-    if (ranS04 && !state.flagged) state.notes.push("No 'Agent flagged suspicious product text' card this take; s06 uses the noFlag narration.");
-    writeJson(RUN_STATE(), state);
-    if (ranS04 && !state.flagged && narrationDur("s06", "noFlag", true) == null) {
-      log("  s06 needs the noFlag narration; generating it");
-      const { runTts } = await import("./tts.mjs");
-      await runTts({ withVariants: true });
-    }
-
-    // s05: blocked category, then the ask-first threshold, then approve.
-    await scene("s05", async ({ cues, hold }) => {
-      await chatTurn("robot vacuum", () => clickChip(P.vacuumChip), ".msg-agent:not(.msg-sim) .blocked");
-      const blocked = await el(".msg-agent:not(.msg-sim) .blocked");
-      const bubble = await page.evaluateHandle((c) => [...document.querySelectorAll(".msg-user")].filter((u) => u.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING).at(-1) ?? c, blocked);
-      await frameSpan(bubble.asElement(), blocked, { ms: 900 });
-      await pointAt(await el(".reasons-block li", { within: ".msg-agent:not(.msg-sim) .blocked" }));
-      await pause(900);
-      const strike = await page.$(".msg-agent:not(.msg-sim) .blocked .strike");
-      if (strike) await moveTo(strike, { dx: 10 });
-      await rec.until(cues[1] - 4.2); // "A sheet set over sixty dollars …"
-      // One P2 prompt per take; if it is bought without asking (≤ $60), the next take uses $90.
-      const prompt = carry.p2Retry ? P.P2_retry : P.P2;
-      {
-        await click(await el(".composer input"));
-        await chatTurn(
-          "P2",
-          async () => {
-            await page.evaluate(() => (document.querySelector(".composer input").value = ""));
-            await type(prompt, { min: 25, max: 45 });
-            await pause(200);
-            await page.keyboard.press("Enter");
-          },
-          ".msg-agent:not(.msg-sim) .approval, .msg-agent:not(.msg-sim) .receipt",
-        );
-      }
-      const card = await el(".msg-agent:not(.msg-sim) .approval, .msg-agent:not(.msg-sim) .receipt");
-      if (!(await page.evaluate((c) => c.classList.contains("approval"), card))) {
-        carry.p2Retry = true;
-        throw new Retake(`P2 "${prompt}" was bought without asking (≤ $60)`);
-      }
-      if (prompt !== P.P2) state.notes.push(`s05: used the "${prompt}" prompt.`);
-      await frameSpan(card, card, { ms: 1000 });
-      await pointAt(await el(".reasons-wait li", { within: ".msg-agent:not(.msg-sim) .approval" }));
-      await hold(900); // let the "Waiting for your OK" card register
-      await rec.until(cues[2] - 0.8); // "Nothing is charged until I approve."
-      const approveBtn = await el(".card-actions .btn-primary", { within: ".msg-agent:not(.msg-sim) .approval" });
-      state.p2Amount = await page.evaluate((b) => b.textContent.trim(), approveBtn);
-      await click(approveBtn);
-      await rec.fast(() => waitFor(() => exists(".toast"), 15_000));
+      await pause(200);
+      await moveTo(await el(".budget-hero .hero-num"), { dx: 70, dy: 4, ms: 450 });
+      await until(at("five envelopes") - 1.2);
+      const env = await el(".env");
+      await frameSpan(env, env, { ms: 800 });
+      await pointAt(await el(".env-head .panel-title"), { ms: 450 });
+      await moveTo(await el(".env-rows .env-meter", { last: false }), { dy: 10, ms: 600 });
       await pause(300);
-      await moveTo(await el(".meter"), { dy: 10, ms: 700 });
+      await moveTo(await el(".env-rows .env-meter"), { dy: 10, ms: 900 });
+      await pause(300);
+      const auth = await page.evaluateHandle(() => [...document.querySelectorAll(".rules dt")].find((d) => d.textContent === "PayPal authorization")?.parentElement ?? null);
+      if (auth.asElement()) {
+        await frameSpan(env, auth.asElement(), { ms: 700 });
+        await moveTo(await auth.asElement().$("code"), { dx: 20, dy: 4, ms: 500 });
+      }
       await hold(1000);
     });
+    if (ran("s03") && !FIXTURE) {
+      const s = await apiState();
+      state.authorizationId = s.mandate?.paypal?.authorization_id ?? null;
+      state.mandateMode = s.mandate?.paypal?.mode ?? null;
+      log(`  PayPal authorization ${state.authorizationId}`);
+    }
 
-    // s06: the flag card (if any), then the hijacked-agent simulation.
-    await scene("s06", async ({ cues }) => {
-      // No wait for the "Approved and paid" toast: it sits in a corner, and the narration opens on
-      // the flag card.
-      await page.waitForNetworkIdle({ idleTime: 300, timeout: 3000 }).catch(() => {});
-      const flag = (await page.$$(".flag-card")).at(-1);
-      let clickCue = cues[2];
-      if (flag && state.flagged) {
-        await frameSpan(flag, flag, { align: "center", ms: 1300 });
-        await pointAt(flag, { side: "right" });
-        await rec.until(cues[2] - 0.2); // "But models can be fooled."
-        clickCue = cues[3];
+    // s04: shop the whole list in one pass.
+    await scene("s04", async ({ at, until, hold }) => {
+      const cta = await el(".cta-row button", { text: "Shop the list" });
+      await frameSpan(cta, cta, { align: "center", ms: 600 });
+      await click(cta);
+      await page.waitForSelector(".composer input");
+      await page.waitForSelector("button.chip-suggest");
+      await pause(300);
+      const chip = await el("button.chip-suggest", { text: P.shopChip });
+      await moveTo(chip, { ms: 700 });
+      await until(at("shop my whole") + 0.2);
+      await chatTurn("shop", () => click(chip), ".msg-agent .gift-plan", { max: 4.5 });
+      // Sanity of the take: Mom's gift waits for an OK, Sam has a gift to return.
+      const mom = await rowInfo(await planRow("Mom"));
+      const sam = await rowInfo(await planRow("Sam"));
+      log(`  Mom: ${mom.kind} ${mom.price ?? ""} ${mom.gift ?? ""}; Sam: ${sam.kind} ${sam.price ?? ""}`);
+      state.mom = mom;
+      if (mom.kind !== "gp-waiting") {
+        carry.discarded.push({ take, mom });
+        throw new Retake(`Mom's gift is ${mom.kind} at ${mom.price} (the script needs it over $${ASK_OVER}, waiting for an OK)`);
       }
-      await page.evaluate((ms) => window.__rec.scrollByPx(-1e5, ms), rec.on ? 1300 : 1);
+      if (sam.kind !== "gp-bought") throw new Retake(`Sam's row is ${sam.kind}, nothing to return`);
+      const search = await el(".msg-agent .gift-search");
+      await frameSpan(search, search, { align: "top", ms: 1000 });
+      await pointAt(await el(".tool-source", { within: ".msg-agent .gift-search" }), { side: "right", ms: 600 });
+      // Pan down the strips while the narration names the search.
+      const persons = await page.$$(".msg-agent .gift-search .gs-person");
+      const panEnd = Math.max(at("picks one gift") + 1.2, rec.elapsed() + 2);
+      const step = (panEnd - rec.elapsed()) / Math.max(1, persons.length);
+      for (const p of persons) {
+        await frameSpan(p, p, { align: "center", ms: Math.max(500, step * 700) });
+        await moveTo(await p.$(".gs-name"), { dx: 60, ms: 400 });
+        await until(rec.elapsed() + step * 0.25);
+      }
+      const flag = (await page.$$(".flag-card")).at(-1);
+      state.flagged = Boolean(flag);
+      if (flag) {
+        await frameSpan(flag, flag, { align: "center", ms: 700 });
+        await pointAt(flag, { side: "right", ms: 500 });
+        await pause(1200);
+      }
+      await until(at("Each gift is checked") - 0.6);
+      const plan = await el(".msg-agent .gift-plan");
+      await frameSpan(plan, plan, { align: "top", ms: 1000 });
+      await pointAt(await el(".card-banner strong", { within: ".msg-agent .gift-plan" }), { side: "right", ms: 600 });
+      await until(at("PayPal captures") - 0.2);
+      const cap = await maybe(".gp-bought .pp-id code", { within: ".msg-agent .gift-plan", last: false });
+      if (cap) await moveTo(cap, { dx: 30, ms: 600 });
+      await hold(1200);
+    });
+
+    // s05: the gift plan, then Mom's approval.
+    await scene("s05", async ({ at, until, hold }) => {
+      const plan = await el(".msg-agent .gift-plan");
+      const firstBought = await maybe(".gp-bought", { within: ".msg-agent .gift-plan", last: false });
+      await frameSpan(plan, plan, { ms: 700 });
+      if (firstBought) {
+        await until(at("the gift,") - 0.2);
+        await moveTo(await firstBought.$(".gp-gift"), { dy: 2, ms: 500 });
+        await until(at("the price") - 0.2);
+        await moveTo(await firstBought.$(".gp-price"), { dx: 30, ms: 450 });
+        await until(at("PayPal capture") - 0.2);
+        await moveTo(await firstBought.$(".pp-id code"), { dx: 30, ms: 450 });
+      }
+      await until(at("what's left") - 0.3);
+      const foot = await el(".gp-foot", { within: ".msg-agent .gift-plan" });
+      await frameSpan(foot, foot, { ms: 600 });
+      await pointAt(await foot.$("span"), { ms: 500 });
+      await until(at("Mom's gift") - 0.4);
+      const mom = await planRow("Mom");
+      await frameSpan(mom, mom, { align: "center", ms: 700 });
+      const why = await mom.$(".gp-why-wait");
+      if (why) await pointAt(why, { ms: 500 });
+      const btn = await mom.$(".gp-actions .btn-primary");
+      state.momAmount = await btn.evaluate((b) => b.textContent.trim());
+      await moveTo(btn, { ms: 700 });
+      await until(at("One click") - 0.1);
+      await click(btn);
+      await rec.fast(() => waitFor(async () => (await rowInfo(await planRow("Mom"))).kind === "gp-bought", 20_000));
       await pause(400);
+      const after = await rowInfo(await planRow("Mom"));
+      state.momCapture = after.capture;
+      log(`  Mom approved: ${after.kind} ${after.capture}`);
+      if (after.kind !== "gp-bought") state.notes.push(`s05: Mom's row is ${after.kind} after Approve.`);
+      const momCode = await (await planRow("Mom"))?.$(".pp-id code");
+      if (momCode) await moveTo(momCode, { dx: 30, ms: 500 });
+      await pause(600);
+      await pointAt(await (await el(".gp-foot", { within: ".msg-agent .gift-plan" })).$("strong"), { side: "right", ms: 600 });
+      await hold(1500);
+    });
+
+    // s06: the poisoned listing, then the hijacked-agent simulation.
+    await scene("s06", async ({ at, until }) => {
+      await page.waitForNetworkIdle({ idleTime: 300, timeout: 3000 }).catch(() => {});
+      // The listing that hides an order: the flag card if the agent raised one, else the tile in Mom's options.
+      const flag = (await page.$$(".flag-card")).at(-1);
+      const tile = await page.evaluateHandle(() => [...document.querySelectorAll(".msg-agent .gift-search .gift-tile")].find((t) => /Deluxe Herb Seed/i.test(t.textContent)) ?? null).then((h) => h.asElement());
+      const target = flag ?? tile;
+      state.injectionShown = flag ? "flag-card" : tile ? "tile" : "none";
+      if (target) {
+        if (!flag) {
+          await tile.evaluate((t) => {
+            const strip = t.closest(".gs-strip");
+            if (strip) strip.scrollLeft += t.getBoundingClientRect().left - strip.getBoundingClientRect().left - 40;
+          });
+        }
+        await frameSpan(target, target, { align: "center", ms: 1200 });
+        await pointAt(target, { side: flag ? "right" : "left", ms: 600 });
+      }
+      await until(at("Models can be fooled") - 0.3);
+      await scrollTop(1100);
+      await pause(200);
+      await moveTo(await el(".safety-demo .safety-line"), { dx: -40, ms: 700 });
       const btn = await el(".safety-demo button");
-      await moveTo(await el(".safety-demo .safety-line"), { ms: 900 });
-      await rec.until(clickCue + 0.6); // "This button replays the exact call …"
+      await until(at("this button") - 0.3);
       await click(btn);
       await rec.fast(async () => {
         await page.waitForSelector(".msg-sim .blocked", { timeout: 30_000 });
-        await sleep(1300); // the chat's own smooth scroll to the new card
+        await sleep(1400); // the chat's own smooth scroll to the new card
       });
       const sim = await el(".msg-sim");
       await frameSpan(sim, sim, { align: "top", ms: 900 });
-      await moveTo(await el(".msg-sim .sim-banner strong"), { dx: 40 });
-      await rec.until(cues[cues.length - 3] - 0.3); // "Denied: …"
-      const reasons = await page.$$(".msg-sim .reasons-block li");
-      for (const r of reasons.slice(0, 2)) {
-        await pointAt(r);
-        await pause(900);
+      await moveTo(await el(".msg-sim .sim-banner strong"), { dx: 40, ms: 500 });
+      await until(at("Five gift boxes") - 0.3);
+      const attempt = await maybe(".msg-sim .attempt");
+      if (attempt) {
+        await frameSpan(sim, attempt, { ms: 600 });
+        await pointAt(attempt, { ms: 500 });
       }
+      await until(at("Blocked:") - 0.3);
+      const reasons = await page.$$(".msg-sim .reasons-block li");
+      if (reasons.length) await frameSpan(await el(".msg-sim .card-banner"), reasons.at(-1), { ms: 600 });
+      await pointAt(reasons[0], { ms: 400 });
+      await until(at("over Mom's envelope") - 0.2);
+      const env = (await Promise.all(reasons.map(async (r) => ((await r.evaluate((n) => n.textContent)).includes("envelope") ? r : null)))).find(Boolean) ?? reasons[1];
+      if (env) await pointAt(env, { ms: 400 });
+      state.hijackReasons = await page.$$eval(".msg-sim .reasons-block li", (ls) => ls.map((l) => l.textContent.trim()));
     });
 
-    // s07: refund the last purchase.
-    await scene("s07", async ({ hold }) => {
-      // The Groq fallback model tends to miss that the sheet set was approved in the UI and answers
-      // "still pending" to the bare chip; with Groq answering (or after such a take) type the
-      // explicit prompt instead. Gemini gets the chip, as in the script.
-      const groq = /Groq/.test(await page.$eval(".footer", (n) => n.textContent).catch(() => ""));
-      if (groq || carry.returnTyped) {
-        state.notes.push(`s07: typed "${P.returnTyped}" (${groq ? "Groq fallback answering" : "retake"}).`);
-        await click(await el(".composer input"));
-        await chatTurn(
-          "return",
-          async () => {
-            await type(P.returnTyped, { min: 25, max: 45 });
-            await pause(200);
-            await page.keyboard.press("Enter");
-          },
-          ".msg-agent:not(.msg-sim) .tool-card.refund",
-        );
-      } else {
-        carry.returnTyped = true; // if the chip fails, the next take types the explicit prompt
-        await chatTurn("return", () => clickChip(P.returnChip), ".msg-agent:not(.msg-sim) .tool-card.refund");
-        carry.returnTyped = false;
-      }
-      const card = (await page.$$(".msg-agent:not(.msg-sim) .tool-card.refund")).at(-1);
-      await frameSpan(card, card, { ms: 900 });
-      await pointAt(card, { side: "right" });
-      await pause(1200);
-      await moveTo(await el(".meter"), { dy: 10, ms: 900 });
+    // s07: return Sam's gift.
+    await scene("s07", async ({ at, until, hold }) => {
+      const chip = await el("button.chip-suggest", { text: P.returnChip });
+      await moveTo(chip, { ms: 900 });
+      await until(at("Return Sam") + 0.1);
+      await chatTurn("return", () => click(chip), ".msg-agent .tool-card.refund", { max: 2.4 });
+      const card = (await page.$$(".msg-agent .tool-card.refund")).at(-1);
+      await frameSpan(card, card, { ms: 800 });
+      await pointAt(await card.$(".card-banner span"), { ms: 500 });
+      await until(at("his thirty") - 0.2);
+      await moveTo(await card.$(".card-banner span"), { dx: 120, ms: 700 });
+      await pause(600);
+      const rid = await card.$(".pp-id code");
+      if (rid) await moveTo(rid, { dx: 30, ms: 500 });
+      await pause(700);
+      await moveTo(await el(".meter"), { dy: 10, ms: 800 });
       await hold(1200);
     });
-    if (appScenes.findIndex((x) => x.id === "s07") <= lastNeeded) {
+    if (ran("s07")) {
       await assertNoDuplicateBubbles();
-      state.refundId = await page.evaluate(() => [...document.querySelectorAll(".tool-card.refund")].at(-1)?.innerText.match(/\b[A-Z0-9]{17}\b/)?.[0] ?? null).catch(() => null);
-      state.captureIds = await page.evaluate(() => [...document.querySelectorAll(".receipt")].map((r) => r.innerText.match(/PayPal capture\s+([A-Z0-9-]+)/)?.[1]).filter(Boolean)).catch(() => []);
+      const refund = await page.evaluate(() => [...document.querySelectorAll(".tool-card.refund")].at(-1)?.innerText ?? "");
+      state.refundText = refund.split("\n").slice(0, 2).join(" ");
+      if (!/Sam's envelope has \$30\.00 again/.test(refund)) state.notes.push(`s07: refund card reads "${state.refundText}"`);
     }
 
-    // s08: revoke the mandate.
-    await scene("s08", async ({ hold }) => {
-      await nav("Mandate");
-      await page.waitForSelector(".revoke-panel");
-      const panel = await el(".revoke-panel");
-      await frameSpan(panel, panel, { ms: 700 });
-      await click(await el(".revoke-panel button", { text: "Revoke mandate" }));
-      await pause(400);
-      await click(await el(".revoke-panel button", { text: "Yes, revoke now" }));
-      await rec.fast(() => waitFor(() => exists(".pill-revoked"), 20_000)); // PayPal voids the authorization
-      await pause(600);
-      await page.evaluate((ms) => window.__rec.scrollByPx(-1e5, ms), rec.on ? 700 : 1);
-      await moveTo(await el(".page-head .pill"), { dx: 20, dy: 8, ms: 600 });
-      await pause(700);
-      // The chat scrolls itself to its end on mount; cut that, so the page opens at its top on
-      // the "The mandate is revoked." banner.
-      await click(await el(".nav a", { text: "Agent" }));
+    // s08: the ledger.
+    await scene("s08", async ({ at, until }) => {
+      await click(await el(".nav a", { text: "Ledger" }));
+      // The Ledger page (AG Grid) is lazy-loaded: cut its blank loading panel.
       await rec.cut(async () => {
-        await page.waitForFunction(() => document.querySelector(".nav a.active")?.textContent?.trim() === "Agent");
-        await page.waitForSelector(".no-mandate");
-        await sleep(1400);
-        await page.evaluate(() => (document.scrollingElement.scrollTop = 0));
-        await sleep(250);
+        await page.waitForFunction(() => document.querySelector(".nav a.active")?.textContent?.trim() === "Ledger");
+        await page.waitForSelector(".gift-grid .ag-row", { timeout: 30_000 });
+        await page.waitForSelector(".grid-panel:not(.gift-grid) .ag-row", { timeout: 30_000 });
+        await sleep(700);
       });
-      await moveTo(await el(".no-mandate strong"), { dx: 60, dy: 6, ms: 600 });
-      await hold(1200);
-    });
-
-    // s09: the ledger.
-    await scene("s09", async ({ cues }) => {
-      await waitToastGone();
-      await nav("Ledger");
-      await rec.fast(async () => {
-        await page.waitForSelector(".ag-row", { timeout: 30_000 });
-        await sleep(800);
-      });
-      const kpis = await page.$$(".kpi");
-      for (const k of kpis) {
-        await moveTo(k, { dy: 8, ms: 480 });
-        await pause(120);
+      await rec.restartCast();
+      const gg = await el(".gift-grid");
+      await frameSpan(gg, gg, { align: "top", ms: 900 });
+      const header = async (grid, name) =>
+        page.evaluateHandle((grid, name) => [...document.querySelectorAll(`${grid} .ag-header-cell`)].find((c) => c.textContent?.trim() === name) ?? null, grid, name).then((h) => h.asElement());
+      for (const [phrase, col] of [["each person", "Recipient"], ["their envelope", "Envelope"], ["the gift and", "Gift"], ["PayPal capture", "PayPal capture"]]) {
+        await until(at(phrase) - 0.25);
+        const h = await header(".gift-grid", col);
+        if (h) await moveTo(h, { dy: 46, ms: 450 });
       }
-      const cat = await page.$(".cat-spend");
-      if (cat) await moveTo(cat, { dx: -150, ms: 700 });
-      const grid = await el(".grid-panel");
-      await frameSpan(grid, grid, { align: "top", ms: 1000 });
+      await until(at("Below it") - 0.3);
+      const lg = await el(".grid-panel:not(.gift-grid)");
+      await frameSpan(lg, lg, { align: "top", ms: 1000 });
+      const rows = await page.$$(".grid-panel:not(.gift-grid) .ag-center-cols-container .ag-row");
+      for (const r of rows.slice(0, 4)) {
+        await moveTo(r, { dx: -120, ms: 420 });
+        await pause(80);
+      }
+      await until(at("the blocked attempt") - 1.6);
       await click(await el(".search-box input"));
-      await type(P.ledgerFilter, { min: 90, max: 140 });
-      await pause(1400);
+      await type(P.ledgerFilter, { min: 90, max: 130 });
+      await pause(300);
+      const red = await maybe(".grid-panel:not(.gift-grid) .ag-row.row-deny", { last: false });
+      if (red) await moveTo(red, { dx: -100, ms: 600 });
+      await pause(1000);
+      await click(await el(".search-box input"));
       await page.keyboard.down("Control");
       await page.keyboard.press("a");
       await page.keyboard.up("Control");
       await page.keyboard.press("Backspace");
-      await pause(600);
-      // Point at the red agent.hijacked_attempt row: bring it into the grid's own viewport and
-      // the page's visible band first, then rest the cursor just past the action text.
-      const findHij = () => page.evaluateHandle(() => [...document.querySelectorAll(".ag-row .ag-cell")].find((c) => c.textContent?.trim() === "agent.hijacked_attempt") ?? null);
-      let hij = (await findHij()).asElement();
-      if (hij) {
-        await page.evaluate((c) => {
-          const vp = document.querySelector(".ag-body-viewport");
-          const r = c.getBoundingClientRect();
-          const v = vp?.getBoundingClientRect();
-          if (vp && (r.bottom > v.bottom || r.top < v.top)) vp.scrollTop += r.top - v.top - v.height / 3;
-        }, hij);
-        await sleep(300);
-        hij = (await findHij()).asElement();
-      }
-      if (hij) {
-        const b = await band();
-        const r = await center(hij);
-        if (r.bottom > b.bottom - 20 || r.top < b.top + 20) await frameSpan(hij, hij, { align: "center", ms: 700 });
-        const rr = await center(hij);
-        const textW = await hij.evaluate((c) => {
-          const range = document.createRange();
-          range.selectNodeContents(c);
-          return range.getBoundingClientRect().width;
-        });
-        await moveTo({ x: rr.left + Math.min(rr.w - 8, 14 + textW + 14), y: rr.y }, { ms: 800 });
-        state.hijackPointed = true;
-        await pause(1300);
-      } else {
-        state.notes.push("s09: no agent.hijacked_attempt row in the grid.");
-      }
-      // Pan the grid right to the PayPal ID and Remaining columns.
+      await pause(250);
+      const rh = await header(".grid-panel:not(.gift-grid)", "Recipient");
+      if (rh) await moveTo(rh, { dy: 50, ms: 500 });
+      await pause(400);
       await page.evaluate((ms) => {
-        const vp = document.querySelector(".ag-body-horizontal-scroll-viewport") ?? document.querySelector(".ag-center-cols-viewport");
+        const vp = [...document.querySelectorAll(".grid-panel:not(.gift-grid) .ag-body-horizontal-scroll-viewport, .grid-panel:not(.gift-grid) .ag-center-cols-viewport")][0];
         if (vp) return window.__rec.scrollElX(vp, vp.scrollWidth, ms);
-      }, rec.on ? 1200 : 1);
-      await pause(300);
-      for (const h of ["PayPal ID", "Remaining"]) {
-        const hd = await page.evaluateHandle((t) => [...document.querySelectorAll(".ag-header-cell")].find((c) => c.textContent?.trim() === t) ?? null, h);
-        if (hd.asElement()) {
-          await moveTo(hd.asElement(), { dy: 50, ms: 700 });
-          await pause(700);
-        }
-      }
+      }, rec.on ? 900 : 1);
+      await pause(150);
+      const ph = await header(".grid-panel:not(.gift-grid)", "PayPal ID");
+      if (ph) await moveTo(ph, { dy: 50, ms: 500 });
+      await pause(700);
     });
 
-    // s11: back to the revoked mandate, still.
+    // s09: revoke, then the paypal.void row in the ledger.
+    await scene("s09", async ({ at, until, hold }) => {
+      await nav("Gift list");
+      await page.waitForSelector(".revoke-panel");
+      const panel = await el(".revoke-panel");
+      await frameSpan(panel, panel, { ms: 700 });
+      await click(await el(".revoke-panel button", { text: "Revoke gift list" }));
+      await pause(250);
+      const yes = await el(".revoke-panel button", { text: "Yes, revoke now" });
+      await moveTo(yes, { ms: 400 });
+      await until(at("revokes it") - 0.2);
+      await click(yes);
+      await rec.fast(() => waitFor(() => exists(".pill-revoked"), 20_000)); // PayPal voids the authorization
+      await pause(300);
+      await scrollTop(700);
+      await moveTo(await el(".page-head .pill"), { dx: 20, dy: 8, ms: 500 });
+      await until(at("PayPal releases") - 1.4);
+      await nav("Ledger");
+      await page.waitForSelector(".grid-panel:not(.gift-grid) .ag-row");
+      await sleep(300);
+      const lg = await el(".grid-panel:not(.gift-grid)");
+      await frameSpan(lg, lg, { align: "top", ms: 800 });
+      const voidCell = await page.evaluateHandle(() => [...document.querySelectorAll(".grid-panel:not(.gift-grid) .ag-cell")].find((c) => c.textContent?.trim() === "paypal.void") ?? null).then((h) => h.asElement());
+      if (voidCell) {
+        const summary = await voidCell.evaluate((c) => c.parentElement.querySelector('[col-id="summary"]')?.textContent?.trim() ?? null);
+        state.voidSummary = summary;
+        log(`  paypal.void: ${summary}`);
+        const sc = await maybe('.grid-panel:not(.gift-grid) .ag-row [col-id="summary"]', { text: summary ?? "voided" });
+        await moveTo(sc ?? voidCell, { dx: sc ? -40 : 30, ms: 600 });
+      } else {
+        state.notes.push("s09: no paypal.void row in the ledger.");
+      }
+      await hold(1600);
+    });
+
+    // s11: back to the revoked gift list, a slow scroll over the envelopes.
     await scene("s11", async () => {
-      await nav("Mandate");
-      await page.waitForSelector(".mandate-card");
-      await moveTo({ x: STAGE.appW - 220, y: STAGE.appH - 160 }, { ms: 1600 });
+      await nav("Gift list");
+      await page.waitForSelector(".env-rows");
+      await page.evaluate((ms) => window.__rec.scrollByPx(330, ms), rec.on ? 2200 : 1);
     });
   } catch (e) {
     const dump = join(DIRS.clips, "record-error.png");
@@ -736,11 +780,18 @@ async function recordTake({ only, take, carry }) {
     if (rec.on) await rec.abort().catch(() => {});
     state.aiCalls = aiCalls;
     state.problems = problems;
+    const final = await apiState().catch(() => null);
+    if (final) {
+      state.purchases = final.purchases.map((p) => ({ for: final.mandate?.recipients.find((r) => r.id === p.recipient_id)?.name ?? null, total: p.total, status: p.status, capture: p.paypal.capture_id, refund: p.paypal.refund_id, title: p.items[0]?.title }));
+    }
     writeJson(RUN_STATE(), { ...readJson(RUN_STATE(), {}), ...state, clips: { ...(prevState.clips ?? {}), ...(state.clips ?? {}) } });
     if (problems.length) log("Problems seen:\n  " + problems.join("\n  "));
     await browser.close();
   }
   log(`Recording done: ${aiCalls} AI turn(s) sent to the app.`);
-  if (only?.length && only.length < appScenes.length) log("Note: a partial re-record runs in a new session; amounts can differ from the other clips. Re-record s02-s09 together for continuity.");
+  if (only?.length && only.length < appScenes.length) log("Note: a partial re-record runs in a new session; amounts and IDs can differ from the other clips. Re-record s02-s11 together for continuity.");
   return state;
 }
+
+// Keep the hasVoice import used (scenes without narration set their own minimum clip length).
+void hasVoice;

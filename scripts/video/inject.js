@@ -12,11 +12,11 @@
     style.textContent = `
       html::-webkit-scrollbar, *::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
       #__cursor { position: fixed; left: 0; top: 0; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%;
-        background: rgba(14, 59, 67, 0.62); border: 2.5px solid #fff; box-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+        background: rgba(110, 20, 36, 0.62); border: 2.5px solid #fff; box-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
         z-index: 2147483647; pointer-events: none; transition: transform 0.12s ease, opacity 0.3s ease; }
       #__cursor.down { transform: scale(0.78); }
       .__ripple { position: fixed; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%;
-        border: 3px solid rgba(15, 118, 110, 0.85); z-index: 2147483646; pointer-events: none;
+        border: 3px solid rgba(201, 162, 75, 0.95); z-index: 2147483646; pointer-events: none;
         animation: __ripple 0.55s ease-out forwards; }
       @keyframes __ripple { from { transform: scale(0.6); opacity: 1; } to { transform: scale(2.8); opacity: 0; } }
     `;
@@ -25,7 +25,7 @@
     c.id = "__cursor";
     // Inline styles too: pages with a strict CSP (the PayPal checkout) drop the <style> element.
     c.style.cssText = "position:fixed;left:0;top:0;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;" +
-      "background:rgba(14,59,67,0.62);border:2.5px solid #fff;box-shadow:0 1px 8px rgba(0,0,0,0.35);box-sizing:content-box;" +
+      "background:rgba(110,20,36,0.62);border:2.5px solid #fff;box-shadow:0 1px 8px rgba(0,0,0,0.35);box-sizing:content-box;" +
       "z-index:2147483647;pointer-events:none;transition:transform 0.12s ease, opacity 0.3s ease;";
     document.documentElement.appendChild(c);
     const saved = JSON.parse(sessionStorage.getItem("__cur") || "null") ?? { x: 1180, y: 640 };
@@ -67,7 +67,7 @@
     const r = document.createElement("div");
     r.className = "__ripple";
     r.style.cssText = "position:fixed;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;box-sizing:border-box;" +
-      "border:3px solid rgba(15,118,110,0.85);z-index:2147483646;pointer-events:none;";
+      "border:3px solid rgba(201,162,75,0.95);z-index:2147483646;pointer-events:none;";
     r.style.left = `${pos.x / Z}px`;
     r.style.top = `${pos.y / Z}px`;
     document.documentElement.appendChild(r);

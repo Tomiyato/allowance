@@ -92,15 +92,18 @@ export function duration(file) {
 /** Removes ElevenLabs audio tags ("[warm]", "[short pause]") and the spaces they leave. */
 export const stripTags = (t) => t.replace(/\s*\[[^\]]*\]\s*/g, " ").replace(/\s+/g, " ").trim();
 
-/** The voiceover as spoken words, without audio tags (subtitles, cues, checks); variant "noFlag" for s06. */
+/** The voiceover as spoken words, without audio tags (subtitles, cues, checks); "" for a scene without narration. */
 export function voiceText(scene, variant) {
   return stripTags(ttsText(scene, variant));
 }
 
 /** The voiceover as sent to TTS, audio tags included. */
 export function ttsText(scene, variant) {
-  return variant === "noFlag" && scene.voiceoverNoFlag ? scene.voiceoverNoFlag : scene.voiceover;
+  return (variant === "noFlag" && scene.voiceoverNoFlag ? scene.voiceoverNoFlag : scene.voiceover) ?? "";
 }
+
+/** A scene with narration (s11, the quiet gift-list shot before the end card, has none). */
+export const hasVoice = (scene) => Boolean(stripTags(scene.voiceover ?? ""));
 
 /** Narration manifest written by tts.mjs: { [sceneId]: { main: {file, dur, model}, noFlag?: {...} } }. */
 export const TTS_MANIFEST = () => join(DIRS.tts, "manifest.json");
@@ -113,13 +116,15 @@ export function bumpUsage(key, n = 1) {
   writeJson(USAGE(), u);
 }
 
-/** The narration variant a scene uses, given the recorder's state (flag card seen or not). */
+/** The narration variant a scene uses, given the recorder's state (a scene may carry a "noFlag" take). */
 export function variantFor(scene, state) {
-  return scene.id === "s06" && state && state.flagged === false ? "noFlag" : "main";
+  return scene.voiceoverNoFlag && state && state.flagged === false ? "noFlag" : "main";
 }
 
 /** Narration duration (s) for a scene, after trimming and tempo; null if TTS has not run. */
 export function narrationDur(sceneId, variant = "main", strict = false) {
+  const scene = loadScenes().scenes.find((s) => s.id === sceneId);
+  if (scene && !hasVoice(scene)) return 0;
   const m = readJson(TTS_MANIFEST(), {});
   return m[sceneId]?.[variant]?.dur ?? (strict ? null : m[sceneId]?.main?.dur) ?? null;
 }
@@ -129,6 +134,7 @@ export function narrationDur(sceneId, variant = "main", strict = false) {
  * part of the segment that is not app footage (scene 1 opens on the title card).
  */
 export function minClipFor(scene, narr) {
+  if (!hasVoice(scene)) return scene.minClip ?? 2;
   const need = T.lead + (scene.voiceDelay ?? 0) + narr + T.tail;
   return scene.prefixCard ? Math.max(4, need - (T.titleCard - T.titleXfade)) : need;
 }
@@ -170,6 +176,30 @@ export function sentenceStarts(scene, variant = "main") {
   const m = readJson(TTS_MANIFEST(), {});
   const n = m[scene.id]?.[variant] ?? m[scene.id]?.main;
   const text = voiceText(scene, variant);
+  if (!text) return [];
   const est = sentenceCues(text).map((c) => c.frac * (n?.dur ?? 0));
   return n?.sentences?.length === est.length ? n.sentences : est;
+}
+
+/**
+ * Start time (s from narration start) of the first occurrence of `phrase` (case-insensitive) in a
+ * scene's narration: from the ElevenLabs character alignment, else estimated by character share.
+ * `after` skips occurrences that start before that time. Returns null if the phrase is not spoken.
+ */
+export function phraseAt(scene, phrase, { variant = "main", after = 0 } = {}) {
+  const m = readJson(TTS_MANIFEST(), {});
+  const n = m[scene.id]?.[variant] ?? m[scene.id]?.main;
+  const al = n?.alignFile ? readJson(n.alignFile)?.alignment : null;
+  const needle = phrase.toLowerCase();
+  if (al?.characters?.length) {
+    const src = al.characters.join("").toLowerCase();
+    for (let i = src.indexOf(needle); i >= 0; i = src.indexOf(needle, i + 1)) {
+      const t = Math.max(0, (al.character_start_times_seconds[i] - (n.offset ?? 0)) / (n.tempo ?? 1));
+      if (t >= after) return t;
+    }
+    return null;
+  }
+  const text = voiceText(scene, variant);
+  const i = text.toLowerCase().indexOf(needle);
+  return i < 0 ? null : (i / text.length) * (n?.dur ?? 0);
 }

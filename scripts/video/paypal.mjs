@@ -5,7 +5,7 @@
 //   1. www.sandbox.paypal.com/checkoutnow      (sometimes a cookie banner: #acceptAllButton)
 //                                               email step:    #email, #btnNext
 //   2. same page                                password step: #password, #btnLogin
-//   3. /webapps/hermes … useraction=CONTINUE    "Pay with" page (merchant "Allowance", the $150.00);
+//   3. /webapps/hermes … useraction=CONTINUE    "Pay with" page (merchant "Ribbon", the $200.00);
 //                                               [data-testid=submit-button-initial] "Continue to Review Order"
 //   4. redirect to <app>/paypal/return → /agent (no separate review page in this flow)
 // The loop is a small state machine (detect → act → wait for a change), so it also copes with

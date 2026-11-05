@@ -22,7 +22,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { DIRS, ROOT, RUN_STATE, TTS_MANIFEST, bumpUsage, duration, ensureDirs, ffmpeg, loadScenes, log, readJson, sha, sleep, writeJson } from "./lib.mjs";
+import { DIRS, ROOT, RUN_STATE, TTS_MANIFEST, bumpUsage, duration, ensureDirs, ffmpeg, hasVoice, loadScenes, log, readJson, sha, sleep, writeJson } from "./lib.mjs";
 
 const API = "https://generativelanguage.googleapis.com/v1beta";
 const TEMPO = Number(process.env.VO_TEMPO ?? 1.0);
@@ -173,6 +173,7 @@ export async function runTts({ withVariants } = {}) {
   const variants = withVariants ?? state?.flagged === false;
   const items = [];
   for (const s of cfg.scenes) {
+    if (!hasVoice(s)) continue;
     items.push({ s, variant: "main", text: s.voiceover });
     if (s.voiceoverNoFlag && variants) items.push({ s, variant: "noFlag", text: s.voiceoverNoFlag });
   }

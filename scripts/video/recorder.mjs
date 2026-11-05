@@ -53,12 +53,12 @@ export class Recorder {
     await this.#startCast();
   }
 
-  /** Output length of a span of d real seconds. */
-  static spanOut(kind, d) {
+  /** Output length of a span of d real seconds (a fast span plays in at most `max` seconds, default 2.2). */
+  static spanOut(kind, d, max = 2.2) {
     if (kind === "cut") return 0;
     if (kind === "real") return d;
     if (d <= 1.6) return d; // short waits stay real-time
-    return Math.min(d, Math.max(1.2, Math.min(2.2, d / 4)));
+    return Math.min(d, Math.max(1.2, Math.min(max, d / 4)));
   }
 
   /** Maps a wall-clock time to output seconds from the clip start. */
@@ -68,7 +68,7 @@ export class Recorder {
       if (s.b == null || t <= s.a) continue;
       const d = s.b - s.a;
       const part = Math.min(t, s.b) - s.a;
-      const o = Recorder.spanOut(s.kind, d);
+      const o = Recorder.spanOut(s.kind, d, s.max);
       out -= part - (d > 0 ? (part * o) / d : 0);
     }
     return out;
@@ -79,20 +79,20 @@ export class Recorder {
     return this.on ? this.map(now()) : 0;
   }
 
-  async #span(kind, fn) {
+  async #span(kind, fn, max) {
     if (!this.on) return fn();
-    const s = { a: now(), b: null, kind };
+    const s = { a: now(), b: null, kind, max };
     this.spans.push(s);
     try {
       return await fn();
     } finally {
       s.b = now();
-      if (kind === "fast" && Recorder.spanOut("fast", s.b - s.a) === s.b - s.a) s.kind = "real";
+      if (kind === "fast" && Recorder.spanOut("fast", s.b - s.a, max) === s.b - s.a) s.kind = "real";
     }
   }
-  /** Runs fn; the time it takes plays sped up in the clip. */
-  fast(fn) {
-    return this.#span("fast", fn);
+  /** Runs fn; the time it takes plays sped up in the clip (in at most `max` output seconds). */
+  fast(fn, { max } = {}) {
+    return this.#span("fast", fn, max);
   }
   /** Runs fn; the time it takes is cut from the clip (use only while the screen is static). */
   cut(fn) {

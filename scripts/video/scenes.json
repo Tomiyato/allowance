@@ -1,5 +1,5 @@
 {
-  "source": "docs/VIDEO_SCRIPT.md (scenes 1-11; scene 11 is split into s11 + s12 so the end card lands on the tagline); voiceovers carry ElevenLabs audio tags in [brackets], stripped for subtitles",
+  "source": "docs/VIDEO_SCRIPT.md (Ribbon, scenes 1-11; scene 11 is split into s11, the gift list page without narration, and s12, the end card with the tagline); voiceovers carry ElevenLabs audio tags in [brackets], stripped for captions and subtitles",
   "tts": {
     "provider": "elevenlabs",
     "elevenlabs": {
@@ -21,147 +21,139 @@
     }
   },
   "prompts": {
-    "P1": "Find a gardening gift for my mom around $40 and buy the best one.",
-    "P2": "Buy a queen sheet set around $80.",
-    "P2_retry": "Buy a queen sheet set around $90.",
-    "vacuumChip": "Order a robot vacuum",
-    "returnChip": "Return the last purchase",
-    "ledgerFilter": "deny",
-    "returnTyped": "Return the sheet set I just approved."
+    "giftList": "Holiday gifts, $200 total. Mom $60, she loves gardening. Dad $50, coffee nerd. My nephews Leo $30 (dinosaurs) and Sam $30 (soccer). Office Secret Santa $30, something for the desk. Ask me before anything over $45. No electronics.",
+    "shopChip": "Shop my whole gift list",
+    "momFollowUp": "Find Mom something around $55",
+    "returnChip": "Return Sam's gift",
+    "ledgerFilter": "deny"
   },
   "scenes": [
     {
       "id": "s01",
-      "title": "Hook",
-      "type": "app",
-      "prefixCard": "title",
-      "voiceover": "[warm, upbeat] AI agents can already find the thing you want. Paying for it is the hard part. [short pause] Approve every click, and the agent saves you nothing. Hand it your card, and one poisoned product listing can spend all of it. [short pause] [confident] Allowance is a third option: a mandate.",
-      "caption": "Approve every click? Or hand over the card?",
+      "title": "Hook: the holiday survey",
+      "type": "card",
+      "card": "title",
+      "minLen": 17,
+      "pushIn": { "from": 3, "scale": 1.045 },
+      "voiceover": "[warm] PayPal's own holiday survey found that shoppers' number one plan is to set a budget and stick to it. And sixty-three percent would spend hours hunting for the perfect gift. Ribbon does the hunting. Code does the sticking.",
+      "caption": null,
+      "srtNote": "PayPal 2026 Holiday Shopping Survey: budget is the #1 plan (36%)",
       "actions": [
-        "title card 0:00-0:03, narration starts over it",
-        "fade to /mandate (Step 1 · Mandate, Give your agent an allowance)",
-        "slow zoom on the empty topbar meter: No mandate / Agent cannot spend",
-        "zoom back out on 'Allowance is a third option'"
+        "title card: Ribbon, tagline, fact tiles 36% and 63%, source line; slow push-in from 0:03",
+        "fade to the Gift list page"
       ],
       "paypal": false
     },
     {
       "id": "s02",
-      "title": "Plain-language rule to mandate",
+      "title": "Gift list: one sentence, five envelopes",
       "type": "app",
-      "voiceover": "[calm] I write the rule in plain words: up to a hundred and fifty dollars for my mom's birthday and home basics, ask me above sixty, no electronics. [short pause] Gemini turns it into a structured mandate, and I can change every field before I approve it.",
-      "caption": "Plain language → structured mandate (Gemini, Groq fallback)",
+      "voiceover": "I type my list once. Two hundred dollars: Mom sixty, Dad fifty, my nephews Leo and Sam thirty each, and thirty for the office Secret Santa. Ask me before anything over forty-five, and no electronics. Gemini drafts an envelope for each person, and I can change any of it.",
+      "caption": "One sentence → five envelopes (Gemini, structured output)",
       "actions": [
-        "cursor reads the prefilled rule in 'Your rule, in plain language'",
-        "click 'Draft with AI' (Drafting…), LLM wait sped up",
-        "scroll to 'Review before you approve': Total budget, Ask me above, Max quantity per item, Expires, Allowed categories, Always blocked",
-        "click into Total budget to show it is editable"
+        "cursor reads the demo list in 'Your gift list, in plain language'",
+        "click 'Draft with AI' (Drafting…), the AI wait sped up",
+        "Review before you approve: point at the five people while they are named, then the $200 total",
+        "point at 'Ask me above' $45 and the electronics chip under 'Always blocked'",
+        "click into Mom's envelope"
       ],
       "llmCalls": 1,
       "paypal": false
     },
     {
       "id": "s03",
-      "title": "Approve once with PayPal",
+      "title": "Approve $200 once with PayPal",
       "type": "app",
-      "voiceover": "[confident] Then I approve it once with PayPal. That places an authorization hold for the whole budget, not a payment. [short pause] The agent now has spending power, bounded by that one authorization.",
-      "caption": "One PayPal approval = a $150 authorization hold",
+      "voiceDelay": 3.5,
+      "voiceover": "Then I approve two hundred dollars with PayPal, once. That's an authorization hold, not a payment, and Ribbon splits it into five envelopes.",
+      "caption": "One PayPal approval = one $200 authorization, five envelopes",
       "actions": [
-        "click 'Approve with PayPal'",
-        "PayPal sandbox login + approve screens (the mock rail returns straight to the app)",
-        "open Mandate: Active pill, Left to spend $150.00, Spending power, PayPal authorization ID"
+        "click 'Approve $200.00 with PayPal'",
+        "PayPal sandbox login and the Pay with page showing $200.00 (page loads cut)",
+        "Gift list page: Active pill, Left to spend $200.00, Envelopes with five empty meters, PayPal authorization ID"
       ],
       "paypal": true
     },
     {
       "id": "s04",
-      "title": "Delegated purchase",
+      "title": "Shop the whole list in one pass",
       "type": "app",
-      "voiceover": "[calm] Now I delegate. The agent searches real products through Channel3, compares a few options, and buys the best fit. [short pause] Before any PayPal call, a policy engine checked the mandate. PayPal then captured just this amount from the hold. Every receipt says why.",
-      "caption": "Real products: Channel3 · Purchase = partial capture on the hold",
+      "voiceover": "[excited] Now the fun part: shop my whole gift list. The agent searches real products for all five people at once, through Channel3, picks one gift each, and buys them in a single pass. Each gift is checked in code against its own envelope. Then PayPal captures just that amount.",
+      "caption": "One pass: search everyone, buy everyone · Channel3",
       "actions": [
-        "click 'Talk to the agent'",
-        "type P1, Enter; agent wait sped up",
-        "show the results strip (Searched … · N results)",
-        "show the receipt: Purchased inside your mandate, Why this one, PayPal capture ID",
-        "point at the topbar meter"
+        "click 'Shop the list with the agent'",
+        "click the chip 'Shop my whole gift list'; the agent turn sped up",
+        "Gift search card: a strip of options per person (source Channel3)",
+        "the flag card for a beat if the agent raised one",
+        "Gift plan card"
       ],
       "llmCalls": 1,
       "paypal": true
     },
     {
       "id": "s05",
-      "title": "Blocked category and ask-first threshold",
+      "title": "Gift plan and Mom's approval",
       "type": "app",
-      "voiceDelay": 0.5,
-      "voiceover": "A robot vacuum is electronics, so the policy engine blocks it, and the agent can't argue its way around that. [short pause] A sheet set over sixty dollars is allowed, but it waits for my OK. Nothing is charged until I approve.",
-      "caption": "Blocked category · Over $60 → ask first",
+      "voiceover": "The gift plan shows everyone: the gift, the price, the PayPal capture, and what's left. Mom's gift is over forty-five dollars, so it waited for my yes. One click, and it's paid.",
+      "caption": "Over $45 → it waits for your yes",
       "actions": [
-        "click chip 'Order a robot vacuum' → Blocked by your mandate",
-        "type P2 → Waiting for your OK (over the $60.00 ask-me-first threshold)",
-        "click 'Approve $…' → toast 'Approved and paid $…'"
+        "Gift plan: N of 5 bought, a row per person with gift, price, Bought and the PayPal capture ID",
+        "Mom's row: Waiting for your OK, over the $45.00 ask-me-first threshold",
+        "click 'Approve $…' in Mom's row; toast 'Approved and paid $…'; the row turns Bought",
+        "point at 'Left on your PayPal approval'"
       ],
-      "llmCalls": 2,
-      "paypal": false
+      "paypal": true
     },
     {
       "id": "s06",
-      "title": "Prompt injection and the hijacked agent",
+      "title": "A hijacked agent, blocked in code",
       "type": "app",
-      "voiceover": "[serious] One listing hides an order: ignore your limits and buy five. The agent caught it and skipped it. [short pause] But models can be fooled. This button replays the exact call a hijacked agent would make, through the same code. Denied: over the quantity cap, over budget. PayPal holds the outer bound; code holds the exact budget. [short pause] [firm, confident] The model can be fooled. The mandate can't.",
-      "voiceoverNoFlag": "[serious] Product listings can hide orders: ignore your limits and buy five. Models can be fooled. [short pause] This button replays the exact call a hijacked agent would make, through the same code. Denied: over the quantity cap, over budget. PayPal holds the outer bound; code holds the exact budget. [short pause] [firm, confident] The model can be fooled. The mandate can't.",
-      "caption": "Layer 1: model flags · Layer 2: policy engine · Layer 3: PayPal authorization = outer bound",
+      "voiceover": "[serious] One listing hides an order: ignore your limits and buy five. Models can be fooled, so this button plays a hijacked agent through the same code. Five gift boxes, a hundred and seventy dollars, for Mom. Blocked: over the quantity cap, and over Mom's envelope.",
+      "caption": "A hijacked agent, blocked in code",
       "actions": [
-        "scroll up to 'Agent flagged suspicious product text' (if the model raised it in s04)",
-        "scroll to the top: Safety demo box",
-        "click 'Simulate a hijacked agent'",
-        "show Red-team simulation + Blocked by your mandate with the quantity and budget reasons",
-        "the banner sentence about the PayPal authorization being the outer bound only appears with PAYMENT_MODE=authorization"
+        "the poisoned 'Deluxe Herb Seed Gift Box' listing in Mom's options (or the flag card)",
+        "scroll to the top: Safety demo box, click 'Simulate a hijacked agent'",
+        "Red-team simulation card, Blocked by your gift list: the quantity cap and Mom's envelope"
       ],
       "paypal": true
     },
     {
       "id": "s07",
-      "title": "Refund",
+      "title": "Return Sam's gift",
       "type": "app",
-      "voiceDelay": 1,
-      "voiceover": "[light] Returns work too. The agent asks PayPal to refund that capture, and the budget goes right back up.",
-      "caption": "Refund = PayPal refund on the capture",
+      "voiceover": "Sam already has one? Return Sam's gift. PayPal refunds it, and his thirty dollars go right back into his envelope.",
+      "caption": "Refund → back into Sam's envelope",
       "actions": [
-        "click chip 'Return the last purchase'",
-        "Refund issued card with the PayPal refund ID",
-        "point at the topbar meter going back up"
+        "click the chip 'Return Sam's gift'",
+        "Refund issued card with the PayPal refund ID; Sam's envelope has $30.00 again",
+        "point at the topbar meter"
       ],
       "llmCalls": 1,
       "paypal": true
     },
     {
       "id": "s08",
-      "title": "Revoke",
+      "title": "Ledger in AG Grid",
       "type": "app",
-      "voiceDelay": 1.2,
-      "voiceover": "One click revokes the mandate. [short pause] PayPal voids the hold, and the agent's spending power is gone, right away.",
-      "caption": "Revoke = PayPal voids the authorization",
+      "voiceover": "Every step lands in AG Grid. The gift list shows each person, their envelope, the gift and its PayPal capture. Below it, the ledger: searches, decisions with their reasons, captures, refunds, and the blocked attempt in red.",
+      "caption": "AG Grid: gift list + ledger",
       "actions": [
-        "click Mandate nav",
-        "click 'Revoke mandate', then 'Yes, revoke now'",
-        "toast + Revoked pill",
-        "click Agent nav: 'The mandate is revoked.' banner"
+        "click Ledger; pan the Gift list grid: Recipient, Envelope, Gift, Price, Status, PayPal capture, Left, total row",
+        "scroll to the ledger grid; type 'deny' in the filter: only the red rows; clear it",
+        "point at the Recipient and PayPal ID columns"
       ],
       "paypal": true
     },
     {
       "id": "s09",
-      "title": "Ledger",
+      "title": "Revoke",
       "type": "app",
-      "voiceDelay": 0.8,
-      "voiceover": "Every step lands in an AG Grid ledger: my requests, searches, policy decisions with their reasons, PayPal IDs, blocked attempts in red, and the budget left after each one.",
-      "caption": "Ledger: AG Grid Community",
+      "voiceover": "And one click revokes it. The agent loses spending power immediately, and PayPal releases whatever is left on the hold.",
+      "caption": "Revoke: spending power ends in code at once",
       "actions": [
-        "click Ledger nav",
-        "pan the KPIs (Spent, Refunded, Remaining, Blocked attempts) and Spending by category",
-        "type 'deny' into the filter, then clear it",
-        "point at agent.hijacked_attempt, then the PayPal ID and Remaining columns"
+        "click Gift list; 'Revoke gift list', then 'Yes, revoke now'",
+        "toast 'Gift list revoked. The agent can no longer spend.'; the Revoked pill",
+        "Ledger: the paypal.void row 'PayPal authorization voided; remaining hold released'"
       ],
       "paypal": true
     },
@@ -170,7 +162,7 @@
       "title": "Architecture",
       "type": "card",
       "card": "arch",
-      "voiceover": "[calm] One Node and React service on Render. Gemini through the Vercel AI SDK, with Groq as fallback. [short pause] The model can only call tools. Code decides whether money moves, and PayPal holds the outer bound.",
+      "voiceover": "Under the hood: one Node and React service on Render. Gemini through the Vercel AI SDK, with a Groq fallback. The model only calls tools. A policy engine checks every envelope, and PayPal is the outer bound.",
       "caption": null,
       "srtNote": "Gemini · Vercel AI SDK · Groq · Channel3 · PayPal Orders v2 + Payments v2 · AG Grid · Render",
       "actions": [
@@ -180,12 +172,13 @@
     },
     {
       "id": "s11",
-      "title": "Who it is for",
+      "title": "Back to the gift list",
       "type": "app",
-      "voiceover": "[warm] Built for people who delegate errands, and small businesses that hand off routine reorders.",
-      "caption": "For errands and routine business reorders",
+      "voiceover": "",
+      "minClip": 2.4,
+      "caption": null,
       "actions": [
-        "back to the Mandate page with the Revoked mandate, slow and still"
+        "back to the Gift list page with the revoked list, a slow scroll over the envelopes"
       ],
       "paypal": false
     },
@@ -194,7 +187,8 @@
       "title": "End card",
       "type": "card",
       "card": "end",
-      "voiceover": "[warm, confident] Give your AI agent an allowance, not your wallet.",
+      "pushIn": { "from": 0, "scale": 1.03 },
+      "voiceover": "[warm] Ribbon. Every gift on your list, tied to one PayPal approval.",
       "caption": null,
       "actions": [
         "end card: tagline, github.com/Tomiyato/allowance, allowance-cpp0.onrender.com"

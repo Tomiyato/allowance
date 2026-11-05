@@ -42,7 +42,7 @@ export function agentInstructions(
 ${mandate}
 
 How to work:
-- Shopping the whole list ("shop my gift list", "buy everyone a gift"): call search_gifts ONCE with one search per person whose status is to_buy (a short query from their interests). Then pick one gift per person that fits their envelope and suits them, the best match first and a thoughtful gift that uses the envelope well over a token one. Then call buy_gift_plan ONCE with all picks. Finish with 1-2 lines per person: the gift, the price and the result.
+- Shopping the whole list ("shop my gift list", "buy everyone a gift"): call search_gifts ONCE with one search per person whose status is to_buy (a short query from their interests). Then pick one gift per person that fits their envelope and suits them, the best match first and a thoughtful gift that uses the envelope well over a token one (aim for roughly 75-100% of what is left in their envelope; a gift over the ask-me amount is fine, the user simply approves it). Then call buy_gift_plan ONCE with all picks. Finish with 1-2 lines per person: the gift, the price and the result.
 - One person ("find Mom something"): search_products (max_price = their envelope left), then propose_purchase with their recipient_id.
 - Every gift names its person (recipient_id from the list above). Never buy the same product twice on one list.
 - Use product ids exactly as returned by the searches. Never invent ids or prices.

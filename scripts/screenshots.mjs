@@ -1,6 +1,16 @@
-// Devpost gallery screenshots: drives a running Allowance instance through the demo and saves
-// docs/gallery/01-mandate.png … 06-paypal-approval.png (1500×1000 viewport at 2×: 3000×2000, 3:2,
-// each ≤ 5 MB).
+// Devpost gallery screenshots: drives a running Ribbon instance through the demo list in one fresh
+// session and saves docs/gallery/01-gift-list.png … 06-envelopes.png, 3000×2000 (3:2, each ≤ 5 MB):
+//
+//   01-gift-list.png        the demo list and the AI-drafted envelopes in the people editor
+//   02-paypal-approval.png  PayPal's own sandbox approval page for the $200.00 authorization
+//   03-gift-plan.png        Agent page, the Gift plan after "Shop my whole gift list": Mom waiting
+//                           for an OK, the others bought with their PayPal capture IDs
+//   04-hijack-blocked.png   "Simulate a hijacked agent": the red-team card, blocked by the gift list
+//   05-ledger.png           Ledger: the AG Grid gift-list grid on top of the ledger grid
+//   06-envelopes.png        the active gift list with a meter per person's envelope
+//
+// Each shot is the browser viewport (1500×956 CSS px at 2×) under a slim browser bar that shows the
+// page's real URL, so 02 reads www.sandbox.paypal.com. 00-cover.png is rendered separately.
 //
 // Usage (hosted demo, real PayPal sandbox rail, PAYMENT_MODE=authorization):
 //   BASE_URL=https://allowance-cpp0.onrender.com node scripts/screenshots.mjs
@@ -8,23 +18,21 @@
 //   npm run build && PORT=3150 PRODUCT_SOURCE=channel3 DEMO_INJECTION=1 PAYMENT_MODE=authorization npm start
 //   node scripts/screenshots.mjs     # in a second terminal
 //
-// "Approve with PayPal" logs in to the PayPal sandbox as PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD
-// (read from .env by Node, see scripts/video/paypal.mjs) and shoots 06 on PayPal's own approval
-// page. Each app shot fails if the page shows MOCK text or the footer does not read
-// "PayPal sandbox (authorization)".
+// "Approve $200.00 with PayPal" logs in to the PayPal sandbox as PAYPAL_BUYER_EMAIL /
+// PAYPAL_BUYER_PASSWORD (read from .env by Node, see scripts/video/paypal.mjs). Each app shot fails
+// if the page shows MOCK or FIXTURE text or the footer does not read "PayPal sandbox (authorization)".
+// If the agent bought Mom's gift without asking (≤ $45), the run stops: run it again (a new session).
 //
 // Environment:
 //   BASE_URL     app to drive (default http://localhost:3150)
 //   CHROME_PATH  Chrome/Chromium/Edge executable (default: first installed one found below)
-//   SCALE        deviceScaleFactor, 2 (default) or 1; a shot over 5 MB is retaken at 1
 //   OUT_DIR      output folder (default docs/gallery)
 //
-// Each run starts a fresh browser profile, so it gets a new session: empty mandate, empty ledger.
-// It makes 3–5 LLM calls (mandate draft, two chat turns, one retry each if no card appears).
-// Retake only 01 (one LLM call): node scripts/screenshots.mjs --mandate-only
-// The cover (00-cover.png) is rendered separately from docs/gallery/cover.html: node scripts/screenshots.mjs --cover
+// AI calls: Draft with AI (1), Shop my whole gift list (1 turn, several model steps), and only if Mom
+// got no gift, "Find Mom something around $55" (1). The red-team button and the Ledger need no AI.
+// The cover (00-cover.png) is rendered from docs/gallery/cover.html: node scripts/screenshots.mjs --cover
 
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -34,13 +42,15 @@ import { approveOnPayPal, loadBuyerEnv, onPayPal } from "./video/paypal.mjs";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BASE = (process.env.BASE_URL ?? "http://localhost:3150").replace(/\/+$/, "");
 const OUT = resolve(ROOT, process.env.OUT_DIR ?? "docs/gallery");
-const SCALE = Number(process.env.SCALE ?? 2);
+const SCALE = 2;
 const MAX_BYTES = 5 * 1024 * 1024;
-const VIEW = { width: 1500, height: 1000 };
-const TURN_TIMEOUT = 75_000;
+const FULL = { width: 1500, height: 1000 };
+const BAR = 44; // CSS px of browser bar above the page
+const VIEW = { width: FULL.width, height: FULL.height - BAR };
+const TURN_TIMEOUT = 150_000;
 
-const P1 = "Find a gardening gift for my mom around $40 and buy the best one";
-const VACUUM = "Order a robot vacuum";
+const SHOP = "Shop my whole gift list";
+const MOM_FOLLOW_UP = "Find Mom something around $55";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(`[${new Date().toISOString().slice(11, 19)}]`, ...a);
@@ -78,6 +88,7 @@ page.setDefaultTimeout(60_000);
 const problems = [];
 page.on("pageerror", (e) => problems.push(`[pageerror] ${e.message}`));
 page.on("response", (r) => r.url().includes("/api/") && r.status() >= 400 && problems.push(`[http ${r.status()}] ${r.url()}`));
+const report = { base: BASE, turns: [], shots: [] };
 
 mkdirSync(OUT, { recursive: true });
 
@@ -88,144 +99,212 @@ try {
     await runDemo();
   }
 } catch (e) {
-  const dump = join(tmpdir(), "allowance-screenshots-error.png");
-  await page.screenshot({ path: dump, fullPage: true }).catch(() => {});
+  const dump = join(tmpdir(), "ribbon-screenshots-error.png");
+  await page.screenshot({ path: dump }).catch(() => {});
   log(`Failed: ${e.message}
   Page at failure: ${dump}`);
   process.exitCode = 1;
 } finally {
   if (problems.length) log("Problems seen:\n  " + problems.join("\n  "));
+  if (!process.argv.includes("--cover")) {
+    const file = join(tmpdir(), "ribbon-screenshots-report.json");
+    writeFileSync(file, JSON.stringify(report, null, 2));
+    log(`Report: ${file}`);
+  }
   await browser.close();
 }
 
 // ---------------------------------------------------------------- demo
 
 async function runDemo() {
-  // 1. Mandate: draft from the prefilled rule with AI, then review.
+  // 01. Gift list: draft the prefilled demo list with AI, then the review with five envelopes.
   await page.goto(`${BASE}/mandate`, { waitUntil: "networkidle0" });
   await page.waitForSelector("#rule");
   for (let attempt = 1; ; attempt++) {
     log(`Draft with AI (attempt ${attempt})`);
     await clickButton("Draft with AI");
-    const ok = await waitUntil(() => page.$(".review .form-grid").then(Boolean), 60_000);
-    if (ok) break;
-    if (attempt >= 2) throw new Error("The mandate draft never appeared.");
+    await waitUntil(() => page.$(".review").then(Boolean), 60_000);
+    await waitUntil(async () => !(await hasText("button", "Drafting")), 30_000);
+    const people = await count(".review .rcp-row");
+    await aiTurn("draft");
+    if (people === 5) break;
+    if (attempt >= 2) throw new Error(`The draft has ${people} people, not 5 (the AI fell back to the rule-based parser?).`);
+    log(`The draft has ${people} people; waiting 60 s for the AI quota, then drafting again.`);
+    await sleep(60_000);
   }
-  await waitUntil(async () => !(await hasText("button", "Drafting")), 30_000);
-  await settle();
-  // Rule + full review fit only on tall screens; at 1000 px show the rule text through the fine print.
+  const envelopes = await page.$$eval(".review .rcp-row", (rows) => rows.map((r) => `${r.querySelector(".rcp-name input").value} $${r.querySelector(".rcp-env input").value}`));
+  log(`Draft: ${envelopes.join(", ")}`);
+  report.envelopes = envelopes;
+  // Focus Mom's envelope so the editor reads as editable.
+  await page.click(".review .rcp-row .rcp-env input");
   await frameFirstFit(
     [
-      [".page > .panel:first-of-type", ".review"],
-      ["label[for=rule]", ".review .fine-print"],
-      [".review", ".review"],
+      ["label[for=rule]", ".review .rcp"],
+      [".review", ".review .rcp"],
     ],
-    6,
+    14,
   );
-  await shoot("01-mandate.png");
-  if (process.argv.includes("--mandate-only")) return;
+  await shoot("01-gift-list.png");
 
-  // 2. Approve with PayPal: sandbox login, then 06 on PayPal's approval page (the mock rail
-  //    redirects straight back to /agent, and 06 is skipped).
+  // 02. Approve $200.00 with PayPal: sandbox login, then PayPal's own approval page.
   log("Approve with PayPal");
-  await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0", timeout: 60_000 }).catch(() => {}), clickButton("Approve with PayPal")]);
+  await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0", timeout: 60_000 }).catch(() => {}), clickButton("with PayPal", "button.btn-paypal")]);
   await waitUntil(async () => onPayPal(page) || page.url().includes("/agent"), 30_000);
-  if (onPayPal(page)) {
-    if (!loadBuyerEnv(ROOT)) throw new Error("PayPal sandbox approval needs PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD in .env.");
-    let shot = false;
-    await approveOnPayPal(page, {
-      log,
-      onStep: async (kind) => {
-        if (kind !== "submit" || shot) return;
-        shot = true;
-        await settle(1500);
-        await shoot("06-paypal-approval.png", { appChecks: false });
-      },
-    });
-    if (!shot) log("WARN: PayPal showed no approval page; 06 not shot.");
-  } else {
-    log("WARN: the app did not open PayPal (mock rail?); 06 not shot.");
-  }
-  await waitUntil(async () => !onPayPal(page) && page.url().includes("/agent"), 60_000);
-  if (!page.url().includes("/agent")) await page.goto(`${BASE}/agent`, { waitUntil: "networkidle0" });
-  await page.waitForNetworkIdle({ idleTime: 500, timeout: 20_000 }).catch(() => {});
-  await page.waitForSelector(".meter .pill-active");
-  await page.waitForSelector(".composer input");
-
-  // 3. Delegated purchase.
-  await chatTurn(
-    "P1",
-    async () => {
-      await page.click(".composer input");
-      await page.type(".composer input", P1);
-      await page.keyboard.press("Enter");
+  if (!onPayPal(page)) throw new Error("The app did not open PayPal (mock rail?).");
+  if (!loadBuyerEnv(ROOT)) throw new Error("PayPal sandbox approval needs PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD in .env.");
+  let shot = false;
+  await approveOnPayPal(page, {
+    log,
+    onStep: async (kind) => {
+      if (kind !== "submit" || shot) return;
+      shot = true;
+      await sleep(1500);
+      await framePayPalAmount();
+      await shoot("02-paypal-approval.png", { appChecks: false });
     },
-    ".msg-agent:not(.msg-sim) .receipt, .msg-agent:not(.msg-sim) .approval",
+  });
+  if (!shot) throw new Error("PayPal showed no approval page; 02 not shot.");
+  await waitUntil(async () => !onPayPal(page) && page.url().startsWith(BASE), 60_000);
+  await page.waitForNetworkIdle({ idleTime: 500, timeout: 20_000 }).catch(() => {});
+  if (!page.url().includes("/agent")) await page.goto(`${BASE}/agent`, { waitUntil: "networkidle0" });
+  await page.waitForSelector(".meter .pill-active");
+  report.authorizationId = await apiState().then((s) => s.mandate?.paypal?.authorization_id ?? null);
+  log(`PayPal authorization ${report.authorizationId}`);
+
+  // 03. Shop the whole list in one pass; Mom's gift (> $45) waits for an OK.
+  await page.waitForSelector(".composer input");
+  await chatTurn("shop", () => clickButton(SHOP, "button.chip-suggest"), ".msg-agent .gift-plan");
+  let mom = await momRow();
+  log(`Mom: ${mom.kind} ${mom.price ?? ""} ${mom.gift ?? ""}`);
+  if (mom.kind === "gp-bought") {
+    const st = await apiState();
+    report.searchRows = st.ledger.filter((r) => /search/.test(r.action)).map((r) => `${r.action}: ${r.summary}`);
+    log(`Search rows:\n  ${report.searchRows.join("\n  ")}`);
+  }
+  if (mom.kind === "gp-bought") throw new Error(`The agent bought Mom's gift without asking (${mom.price} ≤ $45). Run again for a new session.`);
+  if (mom.kind !== "gp-waiting") {
+    log(`Mom has no gift waiting (${mom.kind}); asking "${MOM_FOLLOW_UP}"`);
+    await sleep(20_000);
+    await chatTurn(
+      "mom",
+      async () => {
+        await page.click(".composer input");
+        await page.type(".composer input", MOM_FOLLOW_UP);
+        await page.keyboard.press("Enter");
+      },
+      ".msg-agent .approval, .msg-agent .receipt, .msg-agent .blocked",
+    );
+    if (!(await page.$(".msg-agent .approval"))) throw new Error("The follow-up did not leave Mom's gift waiting for an OK.");
+    report.notes = [...(report.notes ?? []), "Mom's gift came from the follow-up prompt"];
+  }
+  await settle(800);
+  await frame(".msg-agent .gift-plan", ".msg-agent .gift-plan");
+  await shoot("03-gift-plan.png");
+  report.plan = await page.$$eval(".msg-agent .gift-plan .gp-row", (rows) =>
+    rows.map((r) => ({
+      who: r.querySelector(".gp-who strong")?.textContent,
+      gift: r.querySelector(".gp-gift")?.textContent,
+      price: r.querySelector(".gp-price")?.textContent,
+      status: r.querySelector(".gp-status")?.textContent,
+      capture: r.querySelector(".pp-id code")?.textContent ?? null,
+    })),
   );
-  if (!(await page.$(".msg-agent:not(.msg-sim) .receipt"))) log("WARN: the agent asked for approval instead of buying; 02 shows the approval card.");
-  await settle();
-  await framePurchase();
-  await shoot("02-agent-purchase.png");
+  console.table(report.plan);
 
-  // 4. Blocked category (and the injection flag, if the agent raised one in turn 1).
-  await chatTurn("robot vacuum", () => clickButton(VACUUM, "button.chip-suggest"), ".msg-agent:not(.msg-sim) .blocked");
-  await settle();
-  await frameBlocked();
-  await shoot("03-flagged-and-blocked.png");
-
-  // 5. Red-team simulation: no LLM call, same purchase path.
+  // 04. Red-team simulation: no AI call, same purchase path.
   log("Simulate a hijacked agent");
   await clickButton("Simulate a hijacked agent");
   await page.waitForSelector(".msg-sim .blocked", { timeout: 30_000 });
-  await settle();
+  await settle(1500);
   await frame(".msg-sim", ".msg-sim");
-  await shoot("04-hijack-simulation.png");
+  await shoot("04-hijack-blocked.png");
 
-  // 6. Ledger.
+  // 06. The active gift list: a meter per envelope (Mom's gift still waiting for an OK).
+  await clickLink("Gift list");
+  await page.waitForSelector(".env-rows");
+  await settle(1200);
+  await frameFirstFit(
+    [
+      [".page-head", ".env"],
+      [".mandate-card", ".env"],
+      [".env", ".env"],
+    ],
+    14,
+  );
+  await shoot("06-envelopes.png");
+
+  // Approve Mom's gift from her envelope row, so the ledger shows the whole list bought.
+  const approve = await page.evaluateHandle(() => [...document.querySelectorAll(".env-decide button")].find((b) => /^\s*Approve/.test(b.textContent)) ?? null);
+  if (approve.asElement()) {
+    log("Approve Mom's gift");
+    await approve.asElement().click();
+    await waitUntil(async () => (await apiState()).recipients.every((r) => r.state !== "waiting_approval"), 30_000);
+    await settle(1000);
+  }
+
+  // 05. Ledger: the gift-list grid on top, the ledger grid below.
   log("Ledger");
   await clickLink("Ledger");
-  await page.waitForSelector(".ag-row", { timeout: 30_000 });
-  await page.waitForSelector(".kpis");
+  await page.waitForSelector(".gift-grid .ag-row", { timeout: 30_000 });
+  await page.waitForSelector(".grid-panel:not(.gift-grid) .ag-row", { timeout: 30_000 });
   await settle(1500);
-  await frameLedger();
+  await frameFirstFit([[".gift-grid", ".grid-panel:not(.gift-grid) .grid-wrap"]], 14, { alignTop: true });
   await shoot("05-ledger.png");
+  const st = await apiState();
+  report.captures = st.purchases.filter((p) => p.paypal?.capture_id).map((p) => ({ for: p.recipient_id, total: p.total, capture: p.paypal.capture_id, status: p.status }));
 }
 
-/** Sends a prompt and waits for a new card matching doneSel; resends once if the turn ends without one. */
+/** Waits for the turn's card; one turn per prompt (a resend would duplicate the user bubble). */
 async function chatTurn(label, send, doneSel) {
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const before = await count(doneSel);
-    log(`${label}: sending (attempt ${attempt})`);
-    await send();
-    const started = Date.now();
-    let outcome = "timeout";
-    while (Date.now() - started < TURN_TIMEOUT) {
-      await sleep(700);
-      const busy = await isBusy();
-      if ((await count(doneSel)) > before && !busy) {
-        outcome = "ok";
-        break;
-      }
-      if (await page.$(".chat-error")) {
-        outcome = "error: " + (await page.$eval(".chat-error span", (n) => n.textContent).catch(() => "?"));
-        break;
-      }
-      if (!busy && Date.now() - started > 4000) {
-        outcome = "ended without the expected card";
-        break;
-      }
+  const before = await count(doneSel);
+  log(`${label}: sending`);
+  await send();
+  const started = Date.now();
+  let outcome = "timeout";
+  let idleSince = null;
+  while (Date.now() - started < TURN_TIMEOUT) {
+    await sleep(700);
+    const busy = await isBusy();
+    if ((await count(doneSel)) > before && !busy) {
+      outcome = "ok";
+      break;
     }
-    if (outcome === "ok") {
-      log(`${label}: done in ${Math.round((Date.now() - started) / 1000)} s`);
-      return;
+    if (await page.$(".chat-error")) {
+      outcome = "error: " + (await page.$eval(".chat-error span", (n) => n.textContent).catch(() => "?"));
+      break;
     }
-    log(`${label}: ${outcome}`);
-    if (await isBusy()) await clickButton("Stop", ".composer button").catch(() => {});
-    if (await page.$(".chat-error")) await clickButton("Dismiss", ".chat-error button").catch(() => {});
-    await waitUntil(async () => !(await isBusy()), 10_000);
-    if (attempt === 1) await sleep(8000); // give a rate limit a moment
+    idleSince = busy ? null : (idleSince ?? Date.now());
+    if (idleSince && Date.now() - started > 4000 && Date.now() - idleSince > 6000) {
+      outcome = "ended without the expected card";
+      break;
+    }
   }
-  throw new Error(`${label}: no card after two attempts.`);
+  await aiTurn(label);
+  if (outcome !== "ok") throw new Error(`${label}: ${outcome}`);
+  log(`${label}: done in ${Math.round((Date.now() - started) / 1000)} s`);
+}
+
+/** Records which model answered the last AI call (the server's mode.ai_active). */
+async function aiTurn(label) {
+  const s = await apiState().catch(() => null);
+  report.turns.push({ label, model: s?.mode?.ai_active ?? null });
+  log(`  ${label}: answered by ${s?.mode?.ai_active ?? "?"}`);
+}
+
+function apiState() {
+  return page.evaluate(() => fetch("/api/state", { credentials: "same-origin" }).then((r) => r.json()));
+}
+
+async function momRow() {
+  return page.evaluate(() => {
+    const row = [...document.querySelectorAll(".msg-agent .gift-plan .gp-row")].find((r) => r.querySelector(".gp-who strong")?.textContent.trim() === "Mom");
+    if (!row) return { kind: "missing" };
+    return {
+      kind: [...row.classList].find((c) => c.startsWith("gp-") && c !== "gp-row") ?? "?",
+      price: row.querySelector(".gp-price")?.textContent ?? null,
+      gift: row.querySelector(".gp-gift")?.textContent ?? null,
+    };
+  });
 }
 
 // ---------------------------------------------------------------- framing
@@ -240,35 +319,36 @@ async function band() {
   });
 }
 
-/** Scrolls so the elements from `first` to `last` sit in the visible band; if they do not fit, `last` wins. */
-async function scrollToSpan(firstEl, lastEl, pad = 16) {
+/** Scrolls so the elements from `first` to `last` sit in the visible band; if they do not fit, `first` (alignTop) or `last` wins. */
+async function scrollToSpan(firstEl, lastEl, pad = 16, { alignTop = false } = {}) {
   const b = await band();
   await page.evaluate(
-    (f, l, b, pad) => {
+    (f, l, b, pad, alignTop) => {
       const y = window.scrollY;
       const top = f.getBoundingClientRect().top + y;
       const bottom = l.getBoundingClientRect().bottom + y;
       const room = b.bottom - b.top - 2 * pad;
-      const target = bottom - top <= room ? top - b.top - pad : bottom - (b.bottom - pad);
+      const target = alignTop || bottom - top <= room ? top - b.top - pad : bottom - (b.bottom - pad);
       window.scrollTo({ top: Math.max(0, target), behavior: "instant" });
     },
     firstEl,
     lastEl,
     b,
     pad,
+    alignTop,
   );
   await settle(700);
 }
 
 /** Frames the first [first, last] selector pair whose span fits the visible band (the last pair always). */
-async function frameFirstFit(pairs, pad = 12) {
+async function frameFirstFit(pairs, pad = 12, opts = {}) {
   const b = await band();
   for (const [i, [f, l]] of pairs.entries()) {
     const fe = (await page.$$(f)).at(-1);
     const le = (await page.$$(l)).at(-1);
     if (!fe || !le) continue;
     const span = await page.evaluate((a, z) => z.getBoundingClientRect().bottom - a.getBoundingClientRect().top, fe, le);
-    if (span <= b.bottom - b.top - 2 * pad || i === pairs.length - 1) return scrollToSpan(fe, le, pad);
+    if (span <= b.bottom - b.top - 2 * pad || i === pairs.length - 1) return scrollToSpan(fe, le, pad, opts);
   }
 }
 
@@ -278,86 +358,57 @@ async function frame(firstSel, lastSel) {
   await scrollToSpan(firsts.at(-1), lasts.at(-1));
 }
 
-/** Product strip and the receipt that followed it, with "Why this one" in view. */
-async function framePurchase() {
-  const card = (await page.$$(".msg-agent:not(.msg-sim) .receipt, .msg-agent:not(.msg-sim) .approval")).at(-1);
-  const strip = await page.evaluateHandle((c) => {
-    const all = [...document.querySelectorAll(".products-card")].filter(
-      (s) => s.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    return all.at(-1) ?? c;
-  }, card);
-  await scrollToSpan(strip.asElement(), card);
-}
-
-/** The injection flag card plus the blocked vacuum when both fit; else the vacuum request and its card. */
-async function frameBlocked() {
-  const blocked = (await page.$$(".msg-agent:not(.msg-sim) .blocked")).at(-1);
-  const flag = (await page.$$(".flag-card")).at(-1);
-  const b = await band();
-  if (flag) {
-    const span = await page.evaluate((f, l) => l.getBoundingClientRect().bottom - f.getBoundingClientRect().top, flag, blocked);
-    if (span <= b.bottom - b.top - 32) return scrollToSpan(flag, blocked);
-    log("Flag card and blocked card do not fit together; framing the blocked card.");
-  } else {
-    log("No injection flag card this run; framing the blocked card.");
-  }
-  const bubble = await page.evaluateHandle((c) => {
-    const users = [...document.querySelectorAll(".msg-user")].filter(
-      (u) => u.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    return users.at(-1) ?? c;
-  }, blocked);
-  await scrollToSpan(bubble.asElement(), blocked);
-}
-
-/** KPI tiles, category bars and as much of the grid as fits, with the flagged rows in view. */
-async function frameLedger() {
-  // Bring a red or amber row into the grid's own viewport if it is not on screen yet.
-  await page.evaluate(() => {
-    const vp = document.querySelector(".ag-body-viewport");
-    const row = document.querySelector(".ag-row.row-deny, .ag-row.row-flag, .ag-row.row-wait");
-    if (vp && row) {
-      const r = row.getBoundingClientRect();
-      const v = vp.getBoundingClientRect();
-      if (r.bottom > v.bottom) vp.scrollTop += r.bottom - v.bottom + 40;
-    }
-  });
-  const kpis = await page.$(".kpis");
-  const grid = await page.$(".grid-panel");
-  const b = await band();
-  const fits = await page.evaluate((f, l) => l.getBoundingClientRect().bottom - f.getBoundingClientRect().top, kpis, grid);
-  if (fits <= b.bottom - b.top - 32) return scrollToSpan(kpis, grid);
-  // Too tall: start at the KPI tiles; the grid runs off the bottom edge.
-  await page.evaluate(
-    (k, top) => window.scrollTo({ top: Math.max(0, k.getBoundingClientRect().top + window.scrollY - top - 16), behavior: "instant" }),
-    kpis,
-    b.top,
-  );
-  await settle(700);
+/** On PayPal's page, bring the first "$200.00" into view (the page is usually short enough anyway). */
+async function framePayPalAmount() {
+  await page
+    .evaluate(() => {
+      const hit = [...document.querySelectorAll("span, p, div, button")].find((n) => n.children.length === 0 && /\$200\.00/.test(n.textContent));
+      if (!hit) return;
+      const r = hit.getBoundingClientRect();
+      if (r.bottom > innerHeight - 40) window.scrollBy({ top: r.bottom - innerHeight + 120, behavior: "instant" });
+    })
+    .catch(() => {});
+  await settle(500);
 }
 
 // ---------------------------------------------------------------- helpers
 
+/** The viewport under a slim browser bar with the page's URL, 1500×1000 CSS px at 2× = 3000×2000. */
 async function shoot(name, { appChecks = true } = {}) {
   const path = join(OUT, name);
   if (appChecks) await checkReal(name);
   await waitUntil(async () => !(await page.$(".toast")), 9000);
   await waitUntil(async () => !(await page.$(".route .spinner, .typing, .skeleton, .tool-pending")), 15_000);
   await waitForVisibleImages();
-  await page.screenshot({ path, type: "png" });
-  let size = statSync(path).size;
-  if (size > MAX_BYTES) {
-    log(`${name}: ${(size / 1e6).toFixed(2)} MB at scale ${SCALE}; retaking at scale 1`);
-    const y = await page.evaluate(() => window.scrollY);
-    await page.setViewport({ ...VIEW, deviceScaleFactor: 1 });
-    await page.evaluate((y) => window.scrollTo({ top: y, behavior: "instant" }), y);
-    await settle(800);
-    await page.screenshot({ path, type: "png" });
-    await page.setViewport({ ...VIEW, deviceScaleFactor: SCALE });
-    size = statSync(path).size;
+  const shotBuf = await page.screenshot({ type: "png" });
+  const url = page.url().replace(/^https?:\/\//, "");
+  await compositeWithBar(shotBuf, url, path);
+  const size = statSync(path).size;
+  if (size > MAX_BYTES) throw new Error(`${name}: ${(size / 1e6).toFixed(2)} MB is over 5 MB`);
+  report.shots.push({ name, url });
+  log(`saved ${name} (${(size / 1e6).toFixed(2)} MB) at ${url.slice(0, 60)}`);
+}
+
+async function compositeWithBar(png, url, path) {
+  const shown = url.length > 72 ? `${url.slice(0, 71)}…` : url;
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+    html,body{margin:0;width:${FULL.width}px;height:${FULL.height}px;overflow:hidden;background:#fff}
+    .bar{height:${BAR}px;box-sizing:border-box;display:grid;grid-template-columns:120px 1fr 120px;align-items:center;background:#f2eadc;border-bottom:1px solid #e4d8c3;font-family:"Inter","Segoe UI",system-ui,sans-serif}
+    .dots{display:flex;gap:8px;padding-left:18px}.dots i{width:12px;height:12px;border-radius:50%;background:#dccfb8}
+    .url{justify-self:center;display:flex;align-items:center;gap:8px;min-width:520px;max-width:900px;height:28px;padding:0 18px;border-radius:9px;background:#fffdf8;border:1px solid #e4d8c3;font-size:15px;color:#5a4e45;font-weight:500;white-space:nowrap;overflow:hidden}
+    .url svg{flex:none;color:#9a8c7c}
+    img{display:block;width:${VIEW.width}px;height:${VIEW.height}px}
+  </style></head><body><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="url"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>${esc(shown)}</span><span></span></div>
+  <img src="data:image/png;base64,${Buffer.from(png).toString("base64")}"></body></html>`;
+  const comp = await browser.newPage();
+  try {
+    await comp.setViewport({ ...FULL, deviceScaleFactor: SCALE });
+    await comp.setContent(html, { waitUntil: "load" });
+    await comp.screenshot({ path, type: "png" });
+  } finally {
+    await comp.close();
   }
-  log(`saved ${name} (${(size / 1e6).toFixed(2)} MB)`);
 }
 
 /** The hosted demo sleeps when idle: wait for /healthz (up to ~2.5 min). */
@@ -372,21 +423,23 @@ async function wake() {
   }
 }
 
-/** Real rail only: no MOCK text, the authorization footer. */
+/** Real rail only: no MOCK or FIXTURE text, the authorization footer. */
 async function checkReal(name) {
   const t = await page.evaluate(() => document.body.innerText);
   const bad = [];
-  if (/MOCK/.test(t)) bad.push("MOCK text on the page");
+  if (/MOCK|FIXTURE/.test(t)) bad.push("MOCK or FIXTURE text on the page");
   if (!/PayPal sandbox \(authorization\)/.test(t)) bad.push("the footer does not read 'PayPal sandbox (authorization)'");
   if (bad.length) throw new Error(`${name}: ${bad.join("; ")}`);
 }
 
 async function shootCover() {
   const html = join(OUT, "cover.html");
+  await page.setViewport({ ...FULL, deviceScaleFactor: SCALE });
   await page.goto(pathToFileURL(html).href, { waitUntil: "networkidle0" });
   await page.evaluate(() => document.fonts.ready);
   await settle(500);
-  await shoot("00-cover.png");
+  await page.screenshot({ path: join(OUT, "00-cover.png"), type: "png" });
+  log("saved 00-cover.png");
 }
 
 async function waitForVisibleImages() {

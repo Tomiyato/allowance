@@ -14,7 +14,7 @@
 // Key: ELEVENLABS_API_KEY from the environment or .env (read by Node; never printed).
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DIRS, ROOT, RUN_STATE, TTS_MANIFEST, bumpUsage, duration, ensureDirs, ffmpeg, loadScenes, log, readJson, sentenceCues, sha, sleep, stripTags, ttsText, writeJson } from "./lib.mjs";
+import { DIRS, ROOT, RUN_STATE, TTS_MANIFEST, bumpUsage, duration, ensureDirs, ffmpeg, hasVoice, loadScenes, log, readJson, sentenceCues, sha, sleep, stripTags, ttsText, writeJson } from "./lib.mjs";
 
 const API = "https://api.elevenlabs.io/v1";
 const TEMPO = Number(process.env.VO_TEMPO ?? 1.0);
@@ -114,6 +114,7 @@ export async function runEleven({ withVariants } = {}) {
   const variants = withVariants ?? state?.flagged === false;
   const items = [];
   for (const s of cfg.scenes) {
+    if (!hasVoice(s)) continue; // a quiet shot (s11)
     items.push({ s, variant: "main", text: ttsText(s, "main") });
     if (s.voiceoverNoFlag && variants) items.push({ s, variant: "noFlag", text: ttsText(s, "noFlag") });
   }
@@ -164,7 +165,12 @@ export async function runEleven({ withVariants } = {}) {
     const sentences = sentenceTimes(it.text, meta.alignment, a)?.map((t) => Number((t / TEMPO).toFixed(3))) ?? null;
     const words = stripTags(it.text).split(/\s+/).length;
     manifest[it.s.id] ??= {};
-    manifest[it.s.id][it.variant] = { file: out, dur: duration(out), rawDur, model: `elevenlabs:${meta.model}`, voice: meta.voiceName ?? meta.voice, voiceId: meta.voice, styled: true, words, sentences };
+    manifest[it.s.id][it.variant] = {
+      file: out, dur: duration(out), rawDur, model: `elevenlabs:${meta.model}`, voice: meta.voiceName ?? meta.voice, voiceId: meta.voice, styled: true, words, sentences,
+      // For phrase-level sync (lib.phraseAt): the alignment lives in the take's JSON; times there are
+      // relative to the untrimmed take, so the trim offset and tempo come along.
+      alignFile: `${base}.json`, offset: Number(a.toFixed(3)), tempo: TEMPO,
+    };
     if (it.variant === "main") total += manifest[it.s.id].main.dur;
   }
   writeJson(TTS_MANIFEST(), manifest);

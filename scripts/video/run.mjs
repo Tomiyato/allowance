@@ -10,17 +10,17 @@
 //   npm run video -- --record=s04,s05      re-record these scenes (the session replays from the
 //                                          start, unrecorded scenes run fast), then compose
 //   npm run video -- --compose-only        rebuild the mp4/srt/stills from cached parts
-//   npm run video -- --verify-audio        transcribe the narration once (Gemini) and diff it
+//   npm run video -- --verify-audio        transcribe the narration once (Gemini, else Groq Whisper) and diff it
 //                                          against the script (catches cut or garbled takes)
 //
 // Voice: ElevenLabs eleven_v4, voice "Jaya" (scenes.json tts.elevenlabs; ELEVENLABS_API_KEY in .env).
 // TTS_PROVIDER=gemini switches back to Gemini TTS (scenes.json tts.gemini).
-// Scene 3 logs in to the PayPal sandbox as PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD (.env, read by
+// Script: docs/VIDEO_SCRIPT.md (Ribbon), mirrored in scenes.json. Scene 3 logs in to the PayPal sandbox as PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD (.env, read by
 // Node). Each take runs in a fresh browser session; a failed chat turn restarts the take (MAX_TAKES).
 // Environment: BASE_URL (default https://allowance-cpp0.onrender.com, the hosted demo), CHROME_PATH, HEADFUL=1, VO_TEMPO (≤ 1.05),
-// AI_COOLDOWN (s between AI calls, default 25), MAX_TAKES (default 3), KEEP_FRAMES=1,
+// AI_COOLDOWN (s between AI calls, default 45), MAX_TAKES (default 3), KEEP_FRAMES=1,
 // ELEVENLABS_VOICE_ID / ELEVENLABS_MODEL_ID / ELEVENLABS_SEED.
-// Outputs: video-out/allowance-demo.mp4, video-out/allowance-demo.srt, video-out/frames/*.png,
+// Outputs: video-out/ribbon-demo.mp4, video-out/ribbon-demo.srt, video-out/frames/*.png,
 // video-out/timing.json; intermediate parts in video-out/cache/.
 import { renderCards } from "./cards.mjs";
 import { compose } from "./compose.mjs";
@@ -49,7 +49,7 @@ try {
     await runTts();
     await record({ only });
     if (!has("--record-only")) {
-      await runTts(); // picks up the s06 variant if the recording needed it
+      await runTts(); // picks up a "noFlag" variant if a scene has one and the recording needed it
       await compose();
     }
   }
