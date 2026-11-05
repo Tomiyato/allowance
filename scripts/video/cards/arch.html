@@ -7,13 +7,13 @@
 <style>
   main { position: relative; height: 100%; padding: 92px 110px 0; }
   .eyebrow { font-size: 26px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent-ink); }
-  h1 { margin: 10px 0 0; font-size: 64px; font-weight: 700; letter-spacing: -0.03em; color: var(--brand); }
+  h1 { margin: 10px 0 0; font-family: var(--display); font-size: 66px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
 
   .diagram { position: absolute; left: 110px; right: 110px; top: 300px; height: 560px; }
   .node {
     position: absolute; width: 250px; padding: 22px 22px 24px;
     background: var(--surface); border: 1px solid var(--line); border-radius: 22px;
-    box-shadow: 0 2px 4px rgba(16, 40, 56, 0.05), 0 16px 40px rgba(16, 40, 56, 0.11);
+    box-shadow: 0 2px 4px rgba(60, 38, 20, 0.05), 0 16px 40px rgba(60, 38, 20, 0.11);
   }
   .node .k { font-size: 19px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
   .node .t { margin-top: 6px; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.12; }
@@ -37,7 +37,7 @@
   svg.wires { position: absolute; inset: 0; overflow: visible; }
   .lbl { position: absolute; font-family: var(--mono); font-size: 19px; font-weight: 600; color: var(--accent-ink);
     background: var(--accent-soft); padding: 4px 10px; border-radius: 8px; white-space: nowrap; transform: translateX(-50%); }
-  .lbl.allow { color: var(--ok); background: #d1fadf; }
+  .lbl.allow { color: var(--ok); background: #d8ecdf; }
 
   .layers { position: absolute; left: 0; right: 0; top: 470px; }
   .layer {
@@ -50,9 +50,9 @@
 
   .bottom {
     position: absolute; left: 110px; right: 110px; bottom: 84px;
-    display: flex; align-items: center; gap: 22px; font-size: 40px; font-weight: 700; letter-spacing: -0.02em; color: var(--brand);
+    display: flex; align-items: center; gap: 22px; font-family: var(--display); font-size: 42px; font-weight: 700; letter-spacing: -0.01em; color: var(--brand);
   }
-  .bottom i { width: 60px; height: 5px; border-radius: 3px; background: var(--mint); }
+  .bottom i { width: 60px; height: 5px; border-radius: 3px; background: var(--gold); }
 
   .r1, .r2, .r3 { transition: none; }
   body[data-step="1"] .r2, body[data-step="1"] .r3, body[data-step="2"] .r3 { opacity: 0; }
@@ -60,6 +60,7 @@
 </head>
 <body class="bg" data-step="3">
   <main>
+    <div class="band" style="top:0"></div>
     <div class="eyebrow">Under the hood</div>
     <h1>One service on Render. Three layers of defence.</h1>
 
@@ -69,30 +70,30 @@
       <svg class="wires" viewBox="0 0 1700 560" width="1700" height="560">
         <defs>
           <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0L10 5L0 10z" fill="#5d6c7a" />
+            <path d="M0 0L10 5L0 10z" fill="#6b5f55" />
           </marker>
           <marker id="ahg" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0L10 5L0 10z" fill="#067647" />
+            <path d="M0 0L10 5L0 10z" fill="#1e6b47" />
           </marker>
         </defs>
-        <g stroke="#5d6c7a" stroke-width="3" fill="none">
+        <g stroke="#6b5f55" stroke-width="3" fill="none">
           <path class="r1" d="M252 262 H318" marker-end="url(#ah)" />
           <path class="r2" d="M572 262 H638" marker-end="url(#ah)" />
           <path class="r2" d="M765 168 V66" marker-end="url(#ah)" />
           <path class="r3" d="M892 262 H1098" marker-end="url(#ah)" />
         </g>
-        <path class="r3" d="M1352 262 H1448" stroke="#067647" stroke-width="3" fill="none" marker-end="url(#ahg)" />
+        <path class="r3" d="M1352 262 H1448" stroke="#1e6b47" stroke-width="3" fill="none" marker-end="url(#ahg)" />
       </svg>
 
       <div class="node r1" style="left:0; top:170px">
         <div class="k">Browser</div>
         <div class="t">React app</div>
-        <div class="s">Mandate · Agent · Ledger<br />(AG Grid Community)</div>
+        <div class="s">Gift list · Agent · Ledger<br />(AG Grid Community)</div>
       </div>
       <div class="node r1" style="left:320px; top:170px">
         <div class="k">Server</div>
         <div class="t">Express on Render</div>
-        <div class="s">Sessions, mandate, ledger</div>
+        <div class="s">Sessions, gift lists, ledger</div>
       </div>
       <div class="node agent r2" style="left:640px; top:170px">
         <div class="k">Agent</div>
@@ -100,20 +101,20 @@
         <div class="s">via Vercel AI SDK,<br />Groq fallback</div>
       </div>
       <div class="node side r2" style="left:640px; top:-40px">
-        <div class="k">search_products</div>
+        <div class="k">search_gifts</div>
         <div class="t">Channel3</div>
       </div>
-      <div class="lbl r3" style="left:995px; top:214px">propose_purchase</div>
+      <div class="lbl r3" style="left:995px; top:214px">buy_gift_plan</div>
       <div class="node policy r3" style="left:1100px; top:170px">
         <div class="k">Code</div>
         <div class="t">Policy engine</div>
-        <div class="s">Deterministic: budget, categories, caps, threshold</div>
+        <div class="s">Deterministic: each envelope, duplicates, ask-me threshold</div>
       </div>
       <div class="lbl allow r3" style="left:1400px; top:214px">allow</div>
       <div class="node paypal r3" style="left:1450px; top:170px">
         <div class="k">PayPal</div>
         <div class="t">Orders v2 + Payments v2</div>
-        <div class="s">Authorize once, partial capture, refund, void</div>
+        <div class="s">Authorize once, capture per gift, refund, void</div>
       </div>
 
       <div class="layers r3">
@@ -123,7 +124,7 @@
       </div>
     </div>
 
-    <div class="bottom r3"><i></i>The model proposes. Code decides. PayPal holds the outer bound.</div>
+    <div class="bottom r3"><i></i>The model proposes. Code checks every envelope. PayPal is the outer bound.</div>
   </main>
   <script>
     const step = new URLSearchParams(location.search).get("step");

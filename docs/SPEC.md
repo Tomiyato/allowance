@@ -1,6 +1,8 @@
-# Allowance — spec v1
+# Spec v1 (superseded)
 
-> Working name. Tagline: **"Give your AI agent an allowance, not your wallet."**
+> **Superseded by [GIFTLIST_SPEC.md](GIFTLIST_SPEC.md) (spec v2, 2026-11-05).** The product is now **Ribbon**, a holiday gift-list agent: "Every gift on your list, tied to one PayPal approval." This file is kept as the record of the v1 single-budget design; the core it describes (policy engine, Orders v2 authorization, partial captures, refunds, void, red-team, ledger) still runs underneath v2. Where v1 and v2 disagree, v2 wins.
+>
+> v1 used an earlier working name that is no longer the product name; below it is written as "the app".
 > Hackathon: PayPal AI Hackathon (Devpost). Submission closes **Nov 12, 2026** (target: ready Nov 10, video Nov 11).
 > Facts behind this spec: `docs/research/paypal.md`, `docs/research/ai-stack.md`.
 
@@ -8,7 +10,7 @@
 
 AI agents can now find and pick products, but nobody wants to hand an agent a card number. Today the choice is "approve every click" (no point in an agent) or "full access" (one prompt injection away from disaster).
 
-Allowance is a **spending mandate** between a person and their AI shopping agent: a budget, allowed categories, a per-item limit above which the agent must ask, and an expiry. The person approves the mandate once with PayPal; the agent then buys on its own inside it. Rules are enforced in code, with PayPal as the outer bound, never by the LLM's good behavior.
+The app is a **spending mandate** between a person and their AI shopping agent: a budget, allowed categories, a per-item limit above which the agent must ask, and an expiry. The person approves the mandate once with PayPal; the agent then buys on its own inside it. Rules are enforced in code, with PayPal as the outer bound, never by the LLM's good behavior.
 
 Audience for the pitch: busy people delegating errands (gifts, household restock), and small-business owners delegating routine supply reorders. Demo persona: a person buying a birthday gift and restocking home supplies.
 
@@ -67,7 +69,7 @@ Also used:
 - **Webhooks:** `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.REFUNDED`, `PAYMENT.AUTHORIZATION.VOIDED` → ledger rows (stretch; needs the Render URL).
 - **PayPal Agent Toolkit** (`@paypal/agent-toolkit`, AI SDK flavor): give the agent the toolkit's **read-only** tools (e.g. order details, transaction listing) so it can answer "what did I spend?" from PayPal data. Money-moving tools from the toolkit are NOT exposed to the LLM. Time-box 1 hour; drop if it fights the stack.
 
-Merchant-of-record model: the app's sandbox business account is the seller ("Allowance checkout"); products come from Channel3 with their real prices; fulfilment is simulated. Stated plainly in README.
+Merchant-of-record model: the app's sandbox business account is the seller (the app's own checkout); products come from Channel3 with their real prices; fulfilment is simulated. Stated plainly in README.
 
 Sandbox accounts: one business (app owner), one personal buyer whose login goes in the README for judges (sandbox test credentials only).
 

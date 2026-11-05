@@ -332,6 +332,17 @@ function policyRecipient(s: Session, r: Recipient | null): PolicyRecipient | nul
 }
 
 /** Products already bought or waiting for approval under this mandate (decision 3: no duplicate gifts). */
+/** Uncaptured room on the PayPal authorization: PayPal counts every capture against it, refunded or not.
+ *  Applies to the authorization rail and to the mock rail that mirrors it; null for per-purchase orders. */
+function holdLeft(s: Session): number | null {
+  const m = s.mandate;
+  if (!m || (rail.mode !== "authorization" && rail.mode !== "mock")) return null;
+  const captured = mandatePurchases(s)
+    .filter((p) => p.paypal.capture_id)
+    .reduce((t, p) => t + p.total, 0);
+  return round2(m.budget_total - captured);
+}
+
 function existingProductIds(s: Session, exceptPurchaseId: string): string[] {
   return mandatePurchases(s)
     .filter((p) => p.id !== exceptPurchaseId && (p.status === "charged" || p.status === "pending_approval"))
@@ -466,6 +477,7 @@ export async function proposePurchase(
           now: new Date(),
           recipient: policyRecipient(s, recipient),
           existingProductIds: existingProductIds(s, p.id),
+          holdLeft: holdLeft(s),
         });
     p.decision = policy.decision;
     p.reasons = policy.reasons;
@@ -572,6 +584,7 @@ export async function approvePurchase(s: Session, id: string, baseUrl: string): 
       humanApproved: true,
       recipient: policyRecipient(s, findRecipient(s.mandate, p.recipient_id)),
       existingProductIds: existingProductIds(s, p.id),
+      holdLeft: holdLeft(s),
     });
     p.decision = policy.decision;
     p.reasons = [...p.reasons, ...policy.reasons];

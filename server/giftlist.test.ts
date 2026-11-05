@@ -241,6 +241,20 @@ describe("gift-list purchases", () => {
     expect(again.status).toBe("charged");
   });
 
+  it("a re-buy after a refund cannot capture more than the PayPal hold has left", async () => {
+    const s = createSession();
+    createMandate(s, { ...DEMO_INPUT, budget_total: 30, recipients: [{ name: "Sam", envelope: 30, interests: "soccer" }] });
+    s.mandate!.status = "active";
+    const sam = s.mandate!.recipients[0].id;
+    const p = await proposePurchase(s, [{ product_id: "cat_soccer_goals", qty: 1 }], "x", BASE, "agent", sam);
+    expect(p.status).toBe("charged");
+    await refundPurchase(s, p.id, "Sam has one", "user");
+    // Envelope and budget are back to $30, but $29 of the $30 hold is already captured.
+    const again = await proposePurchase(s, [{ product_id: "cat_soccer_goals", qty: 1 }], "x", BASE, "agent", sam);
+    expect(again.status).toBe("blocked");
+    expect(again.reasons).toContain("The PayPal hold has $1.00 left to capture; refunds go back to your PayPal account, not onto the hold.");
+  });
+
   it("refunds a legacy purchase with no recipient", async () => {
     const s = createSession();
     createMandate(s, { ...DEMO_INPUT, recipients: [] });

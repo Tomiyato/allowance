@@ -1,11 +1,11 @@
-// Plan A rail: one Orders v2 AUTHORIZE for the whole budget, partial captures per purchase.
+// Plan A rail: one Orders v2 AUTHORIZE for the whole budget, partial captures per purchase, void on revoke.
 // PayPal is the outer bound: once the authorization is used up it refuses further captures, but it
 // accepted an over-capture on the capture that exhausted it (sandbox), so the policy engine owns the
 // exact budget.
 // Verified against the PayPal sandbox: see docs/research/paypal-sandbox-results.md.
 import type { PaymentRail } from "./rail.ts";
 import { PaymentError } from "./rail.ts";
-import { approveLink, money, paypal } from "./client.ts";
+import { approveLink, money, paypal, PAYPAL_BRAND_NAME, PAYPAL_REFUND_NOTE, PAYPAL_SOFT_DESCRIPTOR } from "./client.ts";
 
 export function createAuthorizationRail(): PaymentRail {
   return {
@@ -30,7 +30,7 @@ export function createAuthorizationRail(): PaymentRail {
           payment_source: {
             paypal: {
               experience_context: {
-                brand_name: "Allowance",
+                brand_name: PAYPAL_BRAND_NAME,
                 shipping_preference: "NO_SHIPPING",
                 user_action: "CONTINUE",
                 return_url: urls.returnUrl,
@@ -75,7 +75,7 @@ export function createAuthorizationRail(): PaymentRail {
           final_capture: false,
           invoice_id: req.purchaseId,
           note_to_payer: req.description.slice(0, 255),
-          soft_descriptor: "ALLOWANCE",
+          soft_descriptor: PAYPAL_SOFT_DESCRIPTOR,
         },
       });
       if (!cap?.id) throw new PaymentError("Capture response has no id.", undefined, cap?.debug_id, cap);
@@ -91,13 +91,17 @@ export function createAuthorizationRail(): PaymentRail {
         method: "POST",
         path: `/v2/payments/captures/${captureId}/refund`,
         requestId: `${purchaseId}-refund`,
-        body: { amount: money(amount), invoice_id: `${purchaseId}-r`, note_to_payer: "Returned via Allowance" },
+        body: { amount: money(amount), invoice_id: `${purchaseId}-r`, note_to_payer: PAYPAL_REFUND_NOTE },
       });
       if (!r?.id) throw new PaymentError("Refund response has no id.", undefined, r?.debug_id, r);
       return { refund_id: r.id };
     },
 
-    // Verified against the PayPal sandbox on 2026-11-04 (see docs/research/paypal-sandbox-results.md).
+    // Verified against the PayPal sandbox on 2026-11-05 (docs/research/paypal-sandbox-results.md, void matrix):
+    // void succeeds (200, status VOIDED) while the captures total less than the authorized amount,
+    // after any number of partial captures and refunds, and releases the uncaptured remainder.
+    // Once the captures reach the authorized amount the authorization is CAPTURED and void answers
+    // 422 PREVIOUSLY_CAPTURED (refunds do not reopen it): nothing uncaptured is held then.
     async revoke(m) {
       if (!m.paypal.authorization_id) return { paypal_id: null };
       try {
@@ -107,10 +111,9 @@ export function createAuthorizationRail(): PaymentRail {
           requestId: `${m.id}-void`,
         });
       } catch (e) {
-        // Fully captured or already voided authorizations cannot be voided (422, e.g.
-        // PREVIOUSLY_CAPTURED); nothing is left to hold then, so say so instead of "voided".
-        if (e instanceof PaymentError && e.status === 422) {
-          console.warn(`[paypal] void returned 422 (nothing left on the authorization): ${e.message}`);
+        const issue = paypalIssue(e);
+        if (e instanceof PaymentError && e.status === 422 && issue && NOTHING_HELD.has(issue)) {
+          console.warn(`[paypal] void returned 422 ${issue}: nothing uncaptured is held on the authorization.`);
           return { paypal_id: m.paypal.authorization_id, nothing_to_void: true };
         }
         throw e;
@@ -118,4 +121,13 @@ export function createAuthorizationRail(): PaymentRail {
       return { paypal_id: m.paypal.authorization_id };
     },
   };
+}
+
+/** Void 422 issues that mean no uncaptured money is held: fully captured, already voided, expired. */
+const NOTHING_HELD = new Set(["PREVIOUSLY_CAPTURED", "PREVIOUSLY_VOIDED", "AUTHORIZATION_EXPIRED"]);
+
+function paypalIssue(e: unknown): string | undefined {
+  if (!(e instanceof PaymentError)) return undefined;
+  const d = e.details as any;
+  return d?.details?.[0]?.issue ?? /\(\d{3} ([A-Z_]+)\)/.exec(e.message)?.[1];
 }

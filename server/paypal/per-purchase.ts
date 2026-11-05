@@ -3,7 +3,7 @@
 // Fallback rail: same REST client as the verified authorization rail, but this flow was not exercised against the sandbox.
 import type { PaymentRail } from "./rail.ts";
 import { PaymentError } from "./rail.ts";
-import { approveLink, money, paypal } from "./client.ts";
+import { approveLink, money, paypal, PAYPAL_BRAND_NAME, PAYPAL_REFUND_NOTE } from "./client.ts";
 
 export function createPerPurchaseRail(): PaymentRail {
   return {
@@ -39,7 +39,7 @@ export function createPerPurchaseRail(): PaymentRail {
           payment_source: {
             paypal: {
               experience_context: {
-                brand_name: "Allowance",
+                brand_name: PAYPAL_BRAND_NAME,
                 shipping_preference: "NO_SHIPPING",
                 user_action: "PAY_NOW",
                 return_url: req.urls.returnUrl,
@@ -71,7 +71,7 @@ export function createPerPurchaseRail(): PaymentRail {
         method: "POST",
         path: `/v2/payments/captures/${captureId}/refund`,
         requestId: `${purchaseId}-refund`,
-        body: { amount: money(amount), invoice_id: `${purchaseId}-r` },
+        body: { amount: money(amount), invoice_id: `${purchaseId}-r`, note_to_payer: PAYPAL_REFUND_NOTE },
       });
       if (!r?.id) throw new PaymentError("Refund response has no id.", undefined, r?.debug_id, r);
       return { refund_id: r.id };

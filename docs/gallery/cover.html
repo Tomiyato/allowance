@@ -1,32 +1,41 @@
 <!doctype html>
-<!-- Devpost cover / thumbnail for Allowance. Render to 00-cover.png (1500×1000) with:
+<!-- Devpost cover / thumbnail for Ribbon. Render to 00-cover.png (3000×2000: 1500×1000 CSS px at scale 2) with:
      node scripts/screenshots.mjs --cover
-     Colors, pill, meter and card banners follow web/src/styles.css. -->
+     (as of 2026-11-05 that path runs the app footer check on the cover and fails; any headless Chrome
+     screenshot at viewport 1500×1000, deviceScaleFactor 2 gives the same PNG)
+     Palette, wordmark, bow mark, badges and banners follow web/src/styles.css and web/src/components/Icon.tsx.
+     The gift plan shows the demo list from docs/GIFTLIST_SPEC.md §2 with seeded catalog prices. -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Allowance cover</title>
+<title>Ribbon cover</title>
 <style>
   :root {
-    --bg: #f4f6f7;
-    --surface: #ffffff;
-    --ink: #13293a;
-    --ink-2: #3e5162;
-    --muted: #5d6c7a;
-    --line: #e2e8ee;
-    --brand: #0e3b43;
-    --accent: #0f766e;
-    --accent-ink: #0b5e58;
-    --mint: #7dd3c0;
-    --ok: #067647;
-    --ok-soft: #ecfdf3;
-    --ok-line: #abefc6;
-    --block: #b42318;
+    --bg: #fbf7ee;
+    --surface: #fffdf8;
+    --surface-2: #f7f1e5;
+    --ink: #2a211c;
+    --ink-2: #4e433b;
+    --muted: #6b5f55;
+    --line: #ece3d2;
+    --brand: #8e1b2f;
+    --brand-deep: #6e1424;
+    --gold: #c9a24b;
+    --gold-deep: #a97d2c;
+    --ok: #1e6b47;
+    --ok-soft: #eaf3ec;
+    --ok-line: #b9d9c3;
+    --wait: #86500a;
+    --wait-soft: #fbf2dc;
+    --wait-line: #ebcf8a;
+    --block-solid: #c4370f;
     --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
   body {
+    position: relative;
     width: 1500px;
     height: 1000px;
     overflow: hidden;
@@ -35,146 +44,144 @@
     -webkit-font-smoothing: antialiased;
     font-variant-numeric: tabular-nums;
     background:
-      radial-gradient(900px 700px at 100% 0%, rgba(125, 211, 192, 0.32), transparent 60%),
-      radial-gradient(700px 600px at 0% 100%, rgba(15, 118, 110, 0.10), transparent 60%),
+      radial-gradient(900px 700px at 100% 0%, rgba(201, 162, 75, 0.26), transparent 60%),
+      radial-gradient(760px 640px at 0% 100%, rgba(142, 27, 47, 0.09), transparent 60%),
       var(--bg);
   }
+  /* the app's ribbon band: garnet with a gold edge */
+  .band { position: absolute; left: 0; right: 0; top: 0; height: 12px; background: linear-gradient(to bottom, var(--brand) 0 8px, var(--gold) 8px 12px); }
+
   .stage {
-    position: relative;
     height: 100%;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 660px;
-    grid-template-rows: auto auto;
-    align-content: center;
-    column-gap: 56px;
-    row-gap: 60px;
-    padding: 0 96px;
-  }
-  .brand { grid-column: 1 / -1; }
-  .left { display: flex; flex-direction: column; justify-content: space-between; min-width: 0; }
-
-  /* ---------- left: name + tagline ---------- */
-  .brand { display: flex; align-items: center; gap: 30px; }
-  .brand svg { flex: none; filter: drop-shadow(0 10px 24px rgba(14, 59, 67, 0.28)); }
-  .name {
-    font-size: 150px;
-    font-weight: 800;
-    letter-spacing: -0.045em;
-    line-height: 1;
-    color: var(--brand);
-  }
-  .tagline {
-    margin: 0;
-    font-size: 60px;
-    font-weight: 700;
-    line-height: 1.12;
-    letter-spacing: -0.025em;
-    color: var(--ink);
-  }
-  .tagline em { font-style: normal; color: var(--accent); }
-  .tagline .not { color: var(--muted); }
-  .built {
-    display: flex;
-    padding-bottom: 6px;
+    grid-template-columns: minmax(0, 1fr) 690px;
     align-items: center;
-    gap: 14px;
-    font-size: 26px;
-    font-weight: 600;
-    color: var(--muted);
-    letter-spacing: 0.01em;
+    column-gap: 56px;
+    padding: 12px 80px 0 96px;
   }
-  .built i { width: 40px; height: 3px; border-radius: 2px; background: var(--mint); }
 
-  /* ---------- right: the idea in three UI pieces ---------- */
-  .stack { display: flex; flex-direction: column; gap: 26px; }
+  /* ---------- left: brand + tagline ---------- */
+  .left { display: flex; flex-direction: column; gap: 44px; }
+  .brand { display: flex; align-items: center; gap: 30px; }
+  .brand svg.mk { flex: none; filter: drop-shadow(0 10px 24px rgba(110, 20, 36, 0.28)); }
+  .wordmark { white-space: nowrap; font-family: var(--display); font-weight: 700; font-size: 128px; letter-spacing: -0.01em; line-height: 1; padding-top: 0.2em; color: var(--ink); }
+  .wordmark .r { position: relative; display: inline-block; }
+  .wordmark .r svg { position: absolute; left: 50%; top: -0.27em; width: 0.82em; height: auto; overflow: visible; transform: translateX(-58%) rotate(-10deg); transform-origin: 50% 40%; }
+  .tagline { margin: 0; font-family: var(--display); font-size: 62px; font-weight: 700; line-height: 1.12; letter-spacing: -0.01em; }
+  .tagline em { font-style: normal; color: var(--brand); }
+  .built { display: flex; align-items: center; gap: 14px; font-size: 26px; font-weight: 600; color: var(--muted); letter-spacing: 0.01em; }
+  .built i { width: 40px; height: 4px; border-radius: 2px; background: var(--gold); }
+
+  /* ---------- right: the gift plan card + a blocked hijack ---------- */
+  .stack { display: flex; flex-direction: column; gap: 24px; }
   .card {
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 26px;
-    box-shadow: 0 2px 4px rgba(16, 40, 56, 0.05), 0 18px 48px rgba(16, 40, 56, 0.13);
+    box-shadow: 0 2px 4px rgba(60, 38, 20, 0.05), 0 18px 48px rgba(60, 38, 20, 0.13);
     overflow: hidden;
   }
+  .head { display: flex; align-items: center; gap: 16px; padding: 22px 28px; background: var(--ok-soft); border-bottom: 1px solid var(--ok-line); color: var(--ok); }
+  .head div { display: flex; flex-direction: column; line-height: 1.2; }
+  .head strong { font-size: 27px; font-weight: 750; letter-spacing: -0.01em; }
+  .head span { font-size: 19px; font-weight: 600; color: #2f5e45; }
+  ul { list-style: none; margin: 0; padding: 6px 0; }
+  .row { display: grid; grid-template-columns: 46px 146px minmax(0, 1fr) 92px; grid-template-rows: auto auto; column-gap: 16px; row-gap: 6px; align-items: center; padding: 13px 28px; }
+  .row + .row { border-top: 1px solid var(--line); }
+  .row.wait { background: var(--wait-soft); }
+  .av { grid-row: 1 / 3; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; background: #f5ebdd; color: var(--brand); font-family: var(--display); font-weight: 700; font-size: 24px; }
+  .who { grid-row: 1 / 3; display: flex; flex-direction: column; line-height: 1.15; }
+  .who strong { font-size: 23px; font-weight: 700; }
+  .who small { font-size: 16px; color: var(--muted); font-weight: 600; }
+  .gift { font-size: 21px; font-weight: 600; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .price { font-size: 22px; font-weight: 750; text-align: right; }
+  .badge { grid-column: 3 / 5; justify-self: start; display: inline-flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; padding: 3px 12px 3px 10px; border-radius: 999px; }
+  .badge::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+  .badge.ok { background: var(--ok-soft); color: var(--ok); border: 1px solid var(--ok-line); }
+  .badge.wait { background: #f7e6bd; color: var(--wait); border: 1px solid var(--wait-line); }
+  .foot { display: flex; align-items: baseline; justify-content: space-between; padding: 16px 28px 18px; background: var(--surface-2); border-top: 1px solid var(--line); }
+  .foot span { font-size: 19px; font-weight: 600; color: var(--muted); }
+  .foot strong { font-size: 28px; font-weight: 800; }
+  .foot strong small { font-size: 19px; color: var(--muted); font-weight: 600; }
 
-  .meter { padding: 30px 34px 34px; }
-  .meter-label {
-    font-size: 21px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
+  .block {
+    display: flex; align-items: center; gap: 20px; padding: 20px 26px;
+    color: #fff; border: 0;
+    background: repeating-linear-gradient(135deg, var(--block-solid) 0 22px, #b8330e 22px 44px);
   }
-  .meter-top { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
-  .meter-amount strong { font-size: 66px; font-weight: 800; letter-spacing: -0.03em; }
-  .meter-of { font-size: 38px; color: var(--muted); font-weight: 600; }
-  .pill {
-    display: inline-flex; align-items: center; gap: 12px;
-    font-size: 28px; font-weight: 700;
-    padding: 8px 22px 8px 18px; border-radius: 999px;
-    background: var(--ok-soft); color: var(--ok);
-  }
-  .pill-dot { width: 14px; height: 14px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 7px rgba(6, 118, 71, 0.14); }
-  .track { margin-top: 22px; height: 16px; border-radius: 999px; background: #e8edf0; overflow: hidden; }
-  .fill { width: 73.3%; height: 100%; border-radius: 999px; background: var(--accent); }
-
-  .banner { display: flex; align-items: center; gap: 22px; padding: 24px 30px; }
-  .banner .ic {
-    flex: none; width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center;
-  }
-  .banner .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .banner strong { font-size: 30px; font-weight: 750; letter-spacing: -0.01em; line-height: 1.2; }
-  .banner span { font-size: 24px; line-height: 1.3; }
-
-  .ok { background: var(--ok-soft); border-color: var(--ok-line); color: var(--ok); }
-  .ok .ic { background: #d1fadf; }
-  .ok span { color: #2f6b4f; }
-
-  .block { background: var(--block); border-color: var(--block); color: #fff; }
-  .block .ic { background: rgba(255, 255, 255, 0.16); }
-  .block span { color: #ffe4e1; }
+  .block .ic { flex: none; width: 58px; height: 58px; border-radius: 16px; display: grid; place-items: center; background: rgba(255, 255, 255, 0.16); }
+  .block .txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .block strong { font-size: 27px; font-weight: 750; letter-spacing: -0.01em; }
+  .block span { font-size: 19px; color: #ffe6dc; white-space: nowrap; }
   .block s { text-decoration-thickness: 2px; }
-
-  .stack { align-self: stretch; }
 </style>
 </head>
 <body>
+  <div class="band"></div>
   <main class="stage">
-      <div class="brand">
-        <svg width="128" height="128" viewBox="0 0 32 32" aria-hidden="true">
-          <rect width="32" height="32" rx="8" fill="#0e3b43" />
-          <path d="M8 21a8 8 0 0 1 16 0" fill="none" stroke="#7dd3c0" stroke-width="3" stroke-linecap="round" />
-          <path d="M8 21a8 8 0 0 1 4.3-7.1" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" />
-          <circle cx="16" cy="21" r="2" fill="#fff" />
-        </svg>
-        <span class="name">Allowance</span>
-      </div>
     <section class="left">
-      <p class="tagline">Give your AI agent<br />an <em>allowance</em>,<br /><span class="not">not your wallet.</span></p>
+      <div class="brand">
+        <svg class="mk" width="118" height="118" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#8e1b2f"/><rect x="1" y="1" width="30" height="30" rx="7" fill="none" stroke="#c9a24b" stroke-opacity=".55"/><g transform="translate(2.4 6.6) scale(.68)"><g fill="#fbf3e4"><path fill-rule="evenodd" d="M20 11.5C15.5 3.5 4.5.5 3.4 7.2 2.6 12.6 11.5 15 20 11.5ZM17.2 10.6C13.6 6.6 8 5.2 7.3 8.1 6.8 10.5 11.8 11.7 17.2 10.6Z"/><path fill-rule="evenodd" d="M20 11.5C24.5 3.5 35.5.5 36.6 7.2 37.4 12.6 28.5 15 20 11.5ZM22.8 10.6C26.4 6.6 32 5.2 32.7 8.1 33.2 10.5 28.2 11.7 22.8 10.6Z"/><path d="M18.6 12.4C16.8 16.6 14.2 21.4 11.4 26.2L14.9 25 16.4 27.8C18.3 22.6 19.6 17.6 20.4 12.8Z"/><path d="M21.4 12.4C23.2 16.6 25.8 21.4 28.6 26.2L25.1 25 23.6 27.8C21.7 22.6 20.4 17.6 19.6 12.8Z"/></g><rect x="17.4" y="8.6" width="5.2" height="5.8" rx="2" fill="#d9b25a"/></g></svg>
+        <span class="wordmark"><span class="r">R<svg viewBox="0 0 40 28" aria-hidden="true"><g fill="#8e1b2f"><path fill-rule="evenodd" d="M20 11.5C15.5 3.5 4.5.5 3.4 7.2 2.6 12.6 11.5 15 20 11.5ZM17.2 10.6C13.6 6.6 8 5.2 7.3 8.1 6.8 10.5 11.8 11.7 17.2 10.6Z"/><path fill-rule="evenodd" d="M20 11.5C24.5 3.5 35.5.5 36.6 7.2 37.4 12.6 28.5 15 20 11.5ZM22.8 10.6C26.4 6.6 32 5.2 32.7 8.1 33.2 10.5 28.2 11.7 22.8 10.6Z"/><path d="M18.6 12.4C16.8 16.6 14.2 21.4 11.4 26.2L14.9 25 16.4 27.8C18.3 22.6 19.6 17.6 20.4 12.8Z"/><path d="M21.4 12.4C23.2 16.6 25.8 21.4 28.6 26.2L25.1 25 23.6 27.8C21.7 22.6 20.4 17.6 19.6 12.8Z"/></g><rect x="17.4" y="8.6" width="5.2" height="5.8" rx="2" fill="#6e1424"/></svg></span>ibbon</span>
+      </div>
+      <p class="tagline">Every gift on your list, tied to <em>one PayPal approval.</em></p>
       <div class="built"><i></i>Built with PayPal + AI</div>
     </section>
 
     <section class="stack" aria-label="How it works">
-      <div class="card meter">
-        <div class="meter-label">Mandate · left to spend</div>
-        <div class="meter-top">
-          <span class="meter-amount"><strong>$110</strong><span class="meter-of"> / $150</span></span>
-          <span class="pill"><span class="pill-dot"></span>Active</span>
+      <div class="card">
+        <div class="head">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h16v10H4z M3 7h18v3H3z M12 7v13 M12 7c-2-4-6-3-5 0 M12 7c2-4 6-3 5 0" /></svg>
+          <div><strong>Gift plan: 4 of 5 bought</strong>
+          <span>Each gift was checked in code against its own envelope.</span></div>
         </div>
-        <div class="track"><div class="fill"></div></div>
+        <ul>
+        <li class="row wait">
+          <span class="av">M</span>
+          <span class="who"><strong>Mom</strong><small>envelope $60</small></span>
+          <span class="gift">Cedar Raised Herb Planter Box</span>
+          <span class="price">$52.00</span>
+          <span class="badge wait">Waiting for your OK</span>
+        </li>
+        <li class="row ok">
+          <span class="av">D</span>
+          <span class="who"><strong>Dad</strong><small>envelope $50</small></span>
+          <span class="gift">Pour-Over Coffee Dripper Set</span>
+          <span class="price">$32.00</span>
+          <span class="badge ok">Bought</span>
+        </li>
+        <li class="row ok">
+          <span class="av">L</span>
+          <span class="who"><strong>Leo</strong><small>envelope $30</small></span>
+          <span class="gift">Dinosaur Fossil Dig Kit</span>
+          <span class="price">$24.00</span>
+          <span class="badge ok">Bought</span>
+        </li>
+        <li class="row ok">
+          <span class="av">S</span>
+          <span class="who"><strong>Sam</strong><small>envelope $30</small></span>
+          <span class="gift">Youth Soccer Ball, Size 4</span>
+          <span class="price">$22.00</span>
+          <span class="badge ok">Bought</span>
+        </li>
+        <li class="row ok">
+          <span class="av">S</span>
+          <span class="who"><strong>Secret Santa</strong><small>envelope $30</small></span>
+          <span class="gift">Walnut Desk Organizer</span>
+          <span class="price">$28.00</span>
+          <span class="badge ok">Bought</span>
+        </li>
+        </ul>
+        <div class="foot"><span>Left on your PayPal approval</span><strong>$94.00 <small>of $200.00</small></strong></div>
       </div>
 
-      <div class="card banner ok">
+      <div class="card block">
         <span class="ic">
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3z M9 8h6 M9 12h6 M9 16h3" /></svg>
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6l7-3z M9.5 9.5l5 5 M14.5 9.5l-5 5" /></svg>
         </span>
         <div class="txt">
-          <strong>Purchased inside your mandate</strong>
-          <span>Botanical gift box · garden · <b>$40.00</b></span>
-        </div>
-      </div>
-
-      <div class="card banner block">
-        <span class="ic">
-          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6l7-3z M9.5 9.5l5 5 M14.5 9.5l-5 5" /></svg>
-        </span>
-        <div class="txt">
-          <strong>Blocked by your mandate</strong>
-          <span>Robot vacuum · electronics · <s>$44.90</s></span>
+          <strong>Hijacked agent: blocked by your gift list</strong>
+          <span>5 × Deluxe Herb Seed Gift Box · <s>$170.00</s> · over the cap of 2</span>
         </div>
       </div>
     </section>

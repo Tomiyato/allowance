@@ -1,5 +1,5 @@
 {
-  "name": "allowance-web",
+  "name": "ribbon-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -14,10 +14,10 @@
     "ag-grid-community": "36.2.0",
     "ag-grid-react": "36.2.0",
     "ai": "7.0.162",
-    "allowance": "file:..",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "react-markdown": "10.1.0"
+    "react-markdown": "10.1.0",
+    "ribbon": "file:.."
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

@@ -87,6 +87,12 @@ function safeJson(t: string) {
   }
 }
 
+/** What the buyer sees on PayPal pages, statements and refund emails. */
+export const PAYPAL_BRAND_NAME = "Ribbon";
+/** Card/bank statement descriptor; PayPal Payments v2 caps soft_descriptor at 22 characters. */
+export const PAYPAL_SOFT_DESCRIPTOR = "RIBBON GIFTS";
+export const PAYPAL_REFUND_NOTE = "Returned via Ribbon";
+
 export const money = (amount: number) => ({ currency_code: "USD", value: amount.toFixed(2) });
 
 /** Buyer approval link from an order response: `payer-action` when payment_source is sent, else `approve`. */

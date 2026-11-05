@@ -28,7 +28,7 @@ if (existsSync(dist)) {
   });
 } else {
   app.get("/", (_req, res) => {
-    res.type("text").send("Allowance API is running. Frontend not built yet (web/dist missing). Try GET /api/state.");
+    res.type("text").send("Ribbon API is running. Frontend not built yet (web/dist missing). Try GET /api/state.");
   });
 }
 
@@ -36,7 +36,7 @@ app.use(errorHandler);
 
 const server = app.listen(config.port, () => {
   console.log(
-    `[server] Allowance on http://localhost:${config.port} | payment=${config.paymentMode} products=${config.productSource}` +
+    `[server] Ribbon on http://localhost:${config.port} | payment=${config.paymentMode} products=${config.productSource}` +
       `${config.demoInjection ? " (demo injection on)" : ""} ai=${aiLabel()}`,
   );
 });

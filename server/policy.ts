@@ -26,6 +26,9 @@ export interface PolicyInput {
   /** Gift list: product ids already in a charged or pending_approval purchase of this mandate
    *  (excluding the purchase being evaluated). */
   existingProductIds?: string[];
+  /** Uncaptured room left on the PayPal authorization hold (budget minus every capture, refunded or
+   *  not: a refund goes back to the buyer, it does not refill the hold). null/undefined = no hold. */
+  holdLeft?: number | null;
 }
 
 export interface PolicyRecipient {
@@ -97,6 +100,11 @@ export function evaluatePolicy(input: PolicyInput): PolicyResult {
   const remaining = remainingBudget(m);
   if (total > remaining + 1e-9) {
     deny.push(`Total ${usd(total)} exceeds the remaining budget of ${usd(remaining)}.`);
+  }
+  if (input.holdLeft != null && total > input.holdLeft + 1e-9) {
+    deny.push(
+      `The PayPal hold has ${usd(Math.max(0, input.holdLeft))} left to capture; refunds go back to your PayPal account, not onto the hold.`,
+    );
   }
 
   // 6. Gift list (only when the mandate has recipients): every purchase names a person, fits that

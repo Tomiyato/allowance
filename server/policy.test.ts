@@ -39,6 +39,15 @@ const run = (m: Mandate | null, items: PolicyItem[], humanApproved = false) =>
   evaluatePolicy({ mandate: m, items, now: NOW, humanApproved });
 
 describe("evaluatePolicy", () => {
+  it("denies when the PayPal hold has too little uncaptured room, even after a human OK", () => {
+    // Budget says $150 left (a refund restored it), but PayPal already captured $130 of the hold.
+    const r = evaluatePolicy({ mandate: mandate(), items: [item({ price: 40 })], now: NOW, humanApproved: true, holdLeft: 20 });
+    expect(r.decision).toBe("deny");
+    expect(r.reasons).toContain("The PayPal hold has $20.00 left to capture; refunds go back to your PayPal account, not onto the hold.");
+    expect(evaluatePolicy({ mandate: mandate(), items: [item({ price: 20 })], now: NOW, holdLeft: 20 }).decision).toBe("allow");
+    expect(evaluatePolicy({ mandate: mandate(), items: [item({ price: 40 })], now: NOW, holdLeft: null }).decision).toBe("allow");
+  });
+
   it("allows a purchase inside every limit", () => {
     const r = run(mandate(), [item()]);
     expect(r.decision).toBe("allow");

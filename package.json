@@ -1,8 +1,8 @@
 {
-  "name": "allowance",
+  "name": "ribbon",
   "version": "0.1.0",
   "private": true,
-  "description": "Allowance: give your AI shopping agent an allowance, not your wallet.",
+  "description": "Ribbon: every gift on your list, tied to one PayPal approval. An AI gift-shopping agent with per-person envelopes under one PayPal authorization.",
   "type": "module",
   "license": "MIT",
   "engines": {

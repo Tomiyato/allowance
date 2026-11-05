@@ -85,7 +85,8 @@ export type AgentToolName =
   - `refundPurchase` works for null and non-null recipients.
   - `simulateHijackedAgent` uses the first recipient.
   - New `buyGiftPlan(session, plan: {recipient_id, product_id, rationale}[])` calls `proposePurchase` once per entry, in order, and returns `BuyGiftPlanOutput`.
-  - Revoke: when void returns 422 `PREVIOUSLY_CAPTURED`, the ledger says "Nothing left on the PayPal authorization to void", not "voided".
+  - Revoke: void releases the uncaptured hold after partial captures (sandbox-verified, 11 cases). Only when captures used the whole authorization does PayPal return 422 `PREVIOUSLY_CAPTURED`; the ledger then says "Nothing left on the PayPal authorization to void".
+  - Hold capacity: PayPal counts every capture against the authorization, refunded or not, so the policy engine also denies a purchase larger than the uncaptured room on the hold (`holdLeft`).
 - **store.ts.** `load()` defaults `recipients: []` and `recipient_id: null`. Add a `recipientStatuses(s)` helper, and fill `appState.recipients` and `addLedger` `recipient_id` (default null).
 - **agent/parse-mandate.ts.** `DraftSchema` gets `recipients[] {name, envelope, interests}` and a prompt for splitting. On fallback the heuristic returns `recipients: []` with the existing warning. The threshold default is 45 and the expiry default is now + 29d. Check that Gemini structured output handles the nested array; if not, parse recipients in a second small call.
 - **agent/tools.ts.**

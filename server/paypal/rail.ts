@@ -38,8 +38,9 @@ export interface PaymentRail {
   completeCharge?(m: Mandate, orderId: string, purchaseId: string): Promise<{ capture_id: string }>;
   refund(m: Mandate, captureId: string, amount: number, purchaseId: string): Promise<{ refund_id: string }>;
   /** Kill spending power. Returns the PayPal id of the void (or null when nothing to void).
-   *  nothing_to_void: PayPal refused the void because nothing is left on the authorization
-   *  (422, e.g. PREVIOUSLY_CAPTURED); spending power is gone either way. */
+   *  nothing_to_void: PayPal refused the void because no uncaptured money is held (422
+   *  PREVIOUSLY_CAPTURED: captures reached the authorized amount; PREVIOUSLY_VOIDED;
+   *  AUTHORIZATION_EXPIRED). Spending power is gone either way. */
   revoke(m: Mandate): Promise<{ paypal_id: string | null; nothing_to_void?: boolean }>;
 }
 

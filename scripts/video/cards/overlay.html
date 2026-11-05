@@ -17,21 +17,21 @@
   .window {
     position: absolute; left: var(--x); top: var(--y); width: var(--w); height: calc(var(--bar) + var(--h));
     border-radius: var(--r); background: transparent;
-    box-shadow: 0 0 0 1px rgba(16, 40, 56, 0.10), 0 24px 70px rgba(16, 40, 56, 0.22), 0 4px 12px rgba(16, 40, 56, 0.08);
+    box-shadow: 0 0 0 1px rgba(60, 38, 20, 0.10), 0 24px 70px rgba(60, 38, 20, 0.22), 0 4px 12px rgba(60, 38, 20, 0.08);
     overflow: hidden;
   }
   .bar {
     height: var(--bar); display: grid; grid-template-columns: 120px 1fr 120px; align-items: center;
-    background: #eef2f4; border-bottom: 1px solid #dfe5ea;
+    background: #f2eadc; border-bottom: 1px solid #e4d8c3;
   }
   .dots { display: flex; gap: 8px; padding-left: 16px; }
-  .dots i { width: 12px; height: 12px; border-radius: 50%; background: #cfd8e0; }
+  .dots i { width: 12px; height: 12px; border-radius: 50%; background: #dccfb8; }
   .url {
     justify-self: center; display: flex; align-items: center; gap: 8px; min-width: 460px; justify-content: center;
-    height: 24px; padding: 0 16px; border-radius: 8px; background: #fff; border: 1px solid #dfe5ea;
+    height: 24px; padding: 0 16px; border-radius: 8px; background: #fffdf8; border: 1px solid #e4d8c3;
     font-size: 15px; color: var(--muted); font-weight: 500;
   }
-  .url svg { color: #8a99a6; }
+  .url svg { color: #9a8c7c; }
 
   .mask {
     position: absolute; inset: 0;
@@ -45,8 +45,8 @@
   .caption div {
     display: flex; align-items: center; gap: 18px;
     max-width: 1536px; padding: 14px 30px 14px 22px; border-radius: 16px;
-    background: rgba(14, 59, 67, 0.94); color: #fff;
-    box-shadow: 0 10px 30px rgba(16, 40, 56, 0.25);
+    background: rgba(110, 20, 36, 0.95); color: #fff;
+    box-shadow: 0 10px 30px rgba(60, 38, 20, 0.25);
     font-size: 32px; font-weight: 600; letter-spacing: -0.005em; line-height: 1.2;
   }
   .caption i { flex: none; width: 6px; align-self: stretch; border-radius: 3px; background: var(--mint); }
