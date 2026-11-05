@@ -1,10 +1,17 @@
 // Devpost gallery screenshots: drives a running Allowance instance through the demo and saves
-// docs/gallery/01-mandate.png … 05-ledger.png (1500×1000 viewport, 3:2, each ≤ 5 MB).
+// docs/gallery/01-mandate.png … 06-paypal-approval.png (1500×1000 viewport at 2×: 3000×2000, 3:2,
+// each ≤ 5 MB).
 //
-// Usage:
-//   npm install                      # puppeteer-core is a devDependency (it does not download a browser)
-//   npm run build && PORT=3150 AI_MODEL=gemini-3.6-flash PRODUCT_SOURCE=channel3 DEMO_INJECTION=1 npm start
+// Usage (hosted demo, real PayPal sandbox rail, PAYMENT_MODE=authorization):
+//   BASE_URL=https://allowance-cpp0.onrender.com node scripts/screenshots.mjs
+// Usage (local):
+//   npm run build && PORT=3150 PRODUCT_SOURCE=channel3 DEMO_INJECTION=1 PAYMENT_MODE=authorization npm start
 //   node scripts/screenshots.mjs     # in a second terminal
+//
+// "Approve with PayPal" logs in to the PayPal sandbox as PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD
+// (read from .env by Node, see scripts/video/paypal.mjs) and shoots 06 on PayPal's own approval
+// page. Each app shot fails if the page shows MOCK text or the footer does not read
+// "PayPal sandbox (authorization)".
 //
 // Environment:
 //   BASE_URL     app to drive (default http://localhost:3150)
@@ -22,6 +29,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import puppeteer from "puppeteer-core";
+import { approveOnPayPal, loadBuyerEnv, onPayPal } from "./video/paypal.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BASE = (process.env.BASE_URL ?? "http://localhost:3150").replace(/\/+$/, "");
@@ -56,12 +64,15 @@ function findChrome() {
   return hit;
 }
 
+if (!process.argv.includes("--cover")) await wake();
+
 const browser = await puppeteer.launch({
   executablePath: findChrome(),
   headless: true,
-  args: ["--no-sandbox", "--hide-scrollbars", "--force-color-profile=srgb"],
+  args: ["--no-sandbox", "--hide-scrollbars", "--force-color-profile=srgb", "--lang=en-US"],
 });
 const page = await browser.newPage();
+await page.setExtraHTTPHeaders({ "accept-language": "en-US,en;q=0.9" });
 await page.setViewport({ ...VIEW, deviceScaleFactor: SCALE });
 page.setDefaultTimeout(60_000);
 const problems = [];
@@ -114,10 +125,30 @@ async function runDemo() {
   await shoot("01-mandate.png");
   if (process.argv.includes("--mandate-only")) return;
 
-  // 2. Approve (mock rail redirects straight back to /agent; the real rail would open PayPal).
+  // 2. Approve with PayPal: sandbox login, then 06 on PayPal's approval page (the mock rail
+  //    redirects straight back to /agent, and 06 is skipped).
   log("Approve with PayPal");
-  await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), clickButton("Approve with PayPal")]);
+  await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0", timeout: 60_000 }).catch(() => {}), clickButton("Approve with PayPal")]);
+  await waitUntil(async () => onPayPal(page) || page.url().includes("/agent"), 30_000);
+  if (onPayPal(page)) {
+    if (!loadBuyerEnv(ROOT)) throw new Error("PayPal sandbox approval needs PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD in .env.");
+    let shot = false;
+    await approveOnPayPal(page, {
+      log,
+      onStep: async (kind) => {
+        if (kind !== "submit" || shot) return;
+        shot = true;
+        await settle(1500);
+        await shoot("06-paypal-approval.png", { appChecks: false });
+      },
+    });
+    if (!shot) log("WARN: PayPal showed no approval page; 06 not shot.");
+  } else {
+    log("WARN: the app did not open PayPal (mock rail?); 06 not shot.");
+  }
+  await waitUntil(async () => !onPayPal(page) && page.url().includes("/agent"), 60_000);
   if (!page.url().includes("/agent")) await page.goto(`${BASE}/agent`, { waitUntil: "networkidle0" });
+  await page.waitForNetworkIdle({ idleTime: 500, timeout: 20_000 }).catch(() => {});
   await page.waitForSelector(".meter .pill-active");
   await page.waitForSelector(".composer input");
 
@@ -308,8 +339,9 @@ async function frameLedger() {
 
 // ---------------------------------------------------------------- helpers
 
-async function shoot(name) {
+async function shoot(name, { appChecks = true } = {}) {
   const path = join(OUT, name);
+  if (appChecks) await checkReal(name);
   await waitUntil(async () => !(await page.$(".toast")), 9000);
   await waitUntil(async () => !(await page.$(".route .spinner, .typing, .skeleton, .tool-pending")), 15_000);
   await waitForVisibleImages();
@@ -326,6 +358,27 @@ async function shoot(name) {
     size = statSync(path).size;
   }
   log(`saved ${name} (${(size / 1e6).toFixed(2)} MB)`);
+}
+
+/** The hosted demo sleeps when idle: wait for /healthz (up to ~2.5 min). */
+async function wake() {
+  const end = Date.now() + 150_000;
+  for (;;) {
+    const ok = await fetch(`${BASE}/healthz`, { signal: AbortSignal.timeout(60_000) }).then((r) => r.ok).catch(() => false);
+    if (ok) return log(`${BASE} is awake`);
+    if (Date.now() > end) throw new Error(`${BASE}/healthz does not answer.`);
+    log("waking the app …");
+    await sleep(5000);
+  }
+}
+
+/** Real rail only: no MOCK text, the authorization footer. */
+async function checkReal(name) {
+  const t = await page.evaluate(() => document.body.innerText);
+  const bad = [];
+  if (/MOCK/.test(t)) bad.push("MOCK text on the page");
+  if (!/PayPal sandbox \(authorization\)/.test(t)) bad.push("the footer does not read 'PayPal sandbox (authorization)'");
+  if (bad.length) throw new Error(`${name}: ${bad.join("; ")}`);
 }
 
 async function shootCover() {

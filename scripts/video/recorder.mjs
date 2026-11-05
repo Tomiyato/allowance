@@ -26,6 +26,7 @@ export class Recorder {
     this.frames = [];
     this.spans = []; // { a, b, kind: "fast" | "cut" }
     this.pending = [];
+    this.marks = []; // { kind, a, b }: labelled intervals, e.g. "paypal" while PayPal's pages are on screen
     this.t0 = now();
     this.on = true;
     await this.#startCast();
@@ -57,7 +58,7 @@ export class Recorder {
     if (kind === "cut") return 0;
     if (kind === "real") return d;
     if (d <= 1.6) return d; // short waits stay real-time
-    return Math.min(d, Math.max(1.2, Math.min(2.6, d / 4)));
+    return Math.min(d, Math.max(1.2, Math.min(2.2, d / 4)));
   }
 
   /** Maps a wall-clock time to output seconds from the clip start. */
@@ -98,10 +99,30 @@ export class Recorder {
     return this.#span("cut", fn);
   }
 
+  /** Starts / ends a labelled interval (clips/<id>.json marks.<kind>: [[a, b], …] in output seconds). */
+  markStart(kind) {
+    if (this.on && !this.marks.some((m) => m.kind === kind && m.b == null)) this.marks.push({ kind, a: now(), b: null });
+  }
+  markEnd(kind) {
+    const m = this.on ? this.marks.findLast((x) => x.kind === kind && x.b == null) : null;
+    if (m) m.b = now();
+  }
+
   /** Holds until the clip is at least t output seconds long. */
   async until(t) {
     if (!this.on) return;
     while (this.elapsed() < t) await sleep(Math.min(200, Math.max(20, (t - this.elapsed()) * 1000)));
+  }
+
+  /** Stops without encoding (a discarded take). */
+  async abort() {
+    if (!this.on) return;
+    await this.cdp?.send("Page.stopScreencast").catch(() => {});
+    await this.cdp?.detach().catch(() => {});
+    this.on = false;
+    await Promise.all(this.pending).catch(() => {});
+    rmSync(this.dir, { recursive: true, force: true });
+    log(`✕ rec ${this.id}: discarded`);
   }
 
   /** Stops, then encodes clips/<id>.mp4 and clips/<id>.json. Returns { dur, fast }. */
@@ -140,7 +161,9 @@ export class Recorder {
       .filter((s) => s.kind === "fast")
       .map((s) => [Number(this.map(s.a).toFixed(3)), Number(this.map(s.b).toFixed(3))])
       .filter(([a, b]) => b - a > 0.3);
-    const info = { id: this.id, dur: Number(total.toFixed(3)), frames: this.frames.length, fast, spans: this.spans.map((s) => ({ kind: s.kind, real: Number((s.b - s.a).toFixed(2)) })) };
+    const marks = {};
+    for (const m of this.marks) (marks[m.kind] ??= []).push([Number(this.map(m.a).toFixed(3)), Number(this.map(m.b ?? end).toFixed(3))]);
+    const info = { id: this.id, dur: Number(total.toFixed(3)), frames: this.frames.length, fast, marks, spans: this.spans.map((s) => ({ kind: s.kind, real: Number((s.b - s.a).toFixed(2)) })) };
     writeJson(join(DIRS.clips, `${this.id}.json`), info);
     log(`■ rec ${this.id}: ${total.toFixed(2)} s, ${this.frames.length} frames${fast.length ? `, sped up ${fast.map(([a, b]) => `${a.toFixed(1)}-${b.toFixed(1)}`).join(" ")}` : ""}`);
     if (!process.env.KEEP_FRAMES) rmSync(this.dir, { recursive: true, force: true });

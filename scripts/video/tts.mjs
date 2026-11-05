@@ -1,4 +1,6 @@
-// Voiceover: one WAV per scene with Gemini TTS, cached per (text, voice, style, model).
+// Voiceover: one WAV per scene, cached per (text, voice, style, model).
+// Provider: scenes.json tts.provider or TTS_PROVIDER = "elevenlabs" (default, see tts-eleven.mjs) or
+// "gemini" (this file, below; tts.gemini holds its voice, style and model chain).
 //
 // One voice for the whole video: every scene uses the same model. The model chain comes from
 // scenes.json tts.models (gemini-3.8-flash-tts → gemini-3.1-flash-tts-preview →
@@ -158,9 +160,15 @@ const cacheKey = (text, voice, style, model) => sha(JSON.stringify([text, voice,
 export async function runTts({ withVariants } = {}) {
   ensureDirs();
   const cfg = loadScenes();
-  const { style } = cfg.tts;
-  const voice = process.env.TTS_VOICE ?? cfg.tts.voice;
-  const chain = process.env.TTS_MODEL ? [process.env.TTS_MODEL] : cfg.tts.models;
+  const provider = process.env.TTS_PROVIDER ?? cfg.tts.provider ?? "gemini";
+  if (provider === "elevenlabs") {
+    const { runEleven } = await import("./tts-eleven.mjs");
+    return runEleven({ withVariants });
+  }
+  const g = cfg.tts.gemini ?? cfg.tts;
+  const { style } = g;
+  const voice = process.env.TTS_VOICE ?? g.voice;
+  const chain = process.env.TTS_MODEL ? [process.env.TTS_MODEL] : g.models;
   const state = readJson(RUN_STATE(), null);
   const variants = withVariants ?? state?.flagged === false;
   const items = [];

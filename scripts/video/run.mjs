@@ -1,8 +1,11 @@
 // Demo video pipeline: cards → TTS → screen recording → compose.
 //
-//   npm run video                          everything (the app must be running at BASE_URL)
-//   npm run video -- --tts-only            voiceover only (cached per text/voice/model)
-//   npm run video -- --cards-only          title/architecture/end cards, captions, frame
+//   BASE_URL=https://allowance-cpp0.onrender.com npm run video
+//                                          everything, against the hosted demo (real PayPal sandbox
+//                                          rail, PAYMENT_MODE=authorization; the recorder wakes nothing,
+//                                          so open /healthz first)
+//   npm run video -- --tts-only            voiceover only (cached per scene text/voice/model)
+//   npm run video -- --cards-only          title/architecture/end cards, captions, frames
 //   npm run video -- --record-only         record every app scene, no compose
 //   npm run video -- --record=s04,s05      re-record these scenes (the session replays from the
 //                                          start, unrecorded scenes run fast), then compose
@@ -10,9 +13,13 @@
 //   npm run video -- --verify-audio        transcribe the narration once (Gemini) and diff it
 //                                          against the script (catches cut or garbled takes)
 //
-// Environment: BASE_URL (default http://localhost:3160), CHROME_PATH, TTS_MODEL, TTS_VOICE, HEADFUL=1,
-// PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD (scene 3 on the real PayPal sandbox rail),
-// VO_TEMPO (e.g. 1.05), AI_COOLDOWN (s between AI calls, default 25), KEEP_FRAMES=1.
+// Voice: ElevenLabs eleven_v4, voice "Jaya" (scenes.json tts.elevenlabs; ELEVENLABS_API_KEY in .env).
+// TTS_PROVIDER=gemini switches back to Gemini TTS (scenes.json tts.gemini).
+// Scene 3 logs in to the PayPal sandbox as PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD (.env, read by
+// Node). Each take runs in a fresh browser session; a failed chat turn restarts the take (MAX_TAKES).
+// Environment: BASE_URL (default http://localhost:3160), CHROME_PATH, HEADFUL=1, VO_TEMPO (≤ 1.05),
+// AI_COOLDOWN (s between AI calls, default 25), MAX_TAKES (default 3), KEEP_FRAMES=1,
+// ELEVENLABS_VOICE_ID / ELEVENLABS_MODEL_ID / ELEVENLABS_SEED.
 // Outputs: video-out/allowance-demo.mp4, video-out/allowance-demo.srt, video-out/frames/*.png,
 // video-out/timing.json; intermediate parts in video-out/cache/.
 import { renderCards } from "./cards.mjs";

@@ -89,8 +89,16 @@ export function duration(file) {
   return Number(sh("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file]).trim());
 }
 
-/** The WAV for a scene voiceover (variant "noFlag" for s06 when the model raised no flag). */
+/** Removes ElevenLabs audio tags ("[warm]", "[short pause]") and the spaces they leave. */
+export const stripTags = (t) => t.replace(/\s*\[[^\]]*\]\s*/g, " ").replace(/\s+/g, " ").trim();
+
+/** The voiceover as spoken words, without audio tags (subtitles, cues, checks); variant "noFlag" for s06. */
 export function voiceText(scene, variant) {
+  return stripTags(ttsText(scene, variant));
+}
+
+/** The voiceover as sent to TTS, audio tags included. */
+export function ttsText(scene, variant) {
   return variant === "noFlag" && scene.voiceoverNoFlag ? scene.voiceoverNoFlag : scene.voiceover;
 }
 
@@ -152,4 +160,16 @@ export function findChrome() {
   const hit = candidates.find((p) => p && existsSync(p));
   if (!hit) throw new Error("No Chrome found. Set CHROME_PATH.");
   return hit;
+}
+
+/**
+ * Start time (s from narration start) of each sentence: from the TTS alignment when the manifest
+ * has it (ElevenLabs), else estimated by character share.
+ */
+export function sentenceStarts(scene, variant = "main") {
+  const m = readJson(TTS_MANIFEST(), {});
+  const n = m[scene.id]?.[variant] ?? m[scene.id]?.main;
+  const text = voiceText(scene, variant);
+  const est = sentenceCues(text).map((c) => c.frac * (n?.dur ?? 0));
+  return n?.sentences?.length === est.length ? n.sentences : est;
 }

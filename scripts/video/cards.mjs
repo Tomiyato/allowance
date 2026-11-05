@@ -20,6 +20,7 @@ function jobs() {
     { name: "arch-2", file: "arch.html", query: "step=2" },
     { name: "arch-3", file: "arch.html", query: "step=3" },
     { name: "frame", file: "overlay.html", query: `kind=frame&host=${encodeURIComponent(host)}`, transparent: true },
+    { name: "frame-paypal", file: "overlay.html", query: `kind=frame&host=${encodeURIComponent("www.sandbox.paypal.com")}`, transparent: true },
     { name: "badge", file: "overlay.html", query: "kind=badge", transparent: true },
   ];
   for (const s of cfg.scenes) {

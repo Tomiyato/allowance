@@ -11,11 +11,11 @@ import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cardPng } from "./cards.mjs";
 import {
-  DIRS, FPS, OUT, RUN_STATE, STAGE, T, TTS_MANIFEST, duration, ensureDirs, ffmpeg, loadScenes, log, readJson, sentenceCues, sha,
+  DIRS, FPS, OUT, RUN_STATE, STAGE, T, TTS_MANIFEST, duration, ensureDirs, ffmpeg, loadScenes, log, readJson, sentenceCues, sentenceStarts, sha,
   variantFor, voiceText, writeJson,
 } from "./lib.mjs";
 
-const SEG_VERSION = "seg-v4";
+const SEG_VERSION = "seg-v6";
 const END_HOLD = 2.4; // end card stays after the tagline
 const FADE_OUT = 1.0;
 
@@ -69,6 +69,14 @@ export function buildAppSegment(seg, out) {
   f.push(`[v1][1:v]overlay=0:0[v2]`);
   let last = "v2";
   let idx = 2;
+  if (clip.marks?.paypal?.length) {
+    // PayPal's pages are on screen: the window's URL bar shows PayPal's host meanwhile.
+    inputs.push("-loop", "1", "-framerate", String(FPS), "-t", fmt(compLen), "-i", cardPng("frame-paypal"));
+    const en = clip.marks.paypal.map(([a, b]) => `between(t,${fmt(a)},${fmt(b)})`).join("+");
+    f.push(`[${last}][${idx}:v]overlay=0:0:enable='${en}'[vp]`);
+    last = "vp";
+    idx++;
+  }
   if (s.caption) {
     inputs.push("-loop", "1", "-framerate", String(FPS), "-t", fmt(compLen), "-i", cardPng(`caption-${s.id}`));
     const inAt = 0.5;
@@ -102,8 +110,8 @@ export function buildCardSegment(seg, out) {
   const f = [];
   if (s.card === "arch") {
     // Reveal in three steps on the narration's sentence cues (Gemini… / The model can only call tools…).
-    const cues = sentenceCues(voiceText(s, seg.variant));
-    const at = (k) => T.lead + cues[Math.min(k, cues.length - 1)].frac * narr.dur - 0.25;
+    const cues = sentenceStarts(s, seg.variant);
+    const at = (k) => T.lead + cues[Math.min(k, cues.length - 1)] - 0.25;
     const t1 = at(1);
     const t2 = Math.max(t1 + 1.5, at(2));
     const XF = 0.5;
@@ -180,7 +188,8 @@ export async function compose() {
     const s = seg.scene;
     const out = join(DIRS.segments, `${s.id}.mp4`);
     const keyParts = [SEG_VERSION, fmt(seg.len), seg.variant, JSON.stringify(T)];
-    if (seg.clip) keyParts.push(`${statSync(seg.clip.file).size}:${statSync(seg.clip.file).mtimeMs}`, JSON.stringify(seg.clip.fast ?? []), pngKey("frame"), pngKey("badge"));
+    if (seg.clip) keyParts.push(`${statSync(seg.clip.file).size}:${statSync(seg.clip.file).mtimeMs}`, JSON.stringify(seg.clip.fast ?? []), JSON.stringify(seg.clip.marks ?? {}), pngKey("frame"), pngKey("badge"));
+    if (seg.clip?.marks?.paypal?.length) keyParts.push(pngKey("frame-paypal"));
     if (s.caption) keyParts.push(pngKey(`caption-${s.id}`));
     if (s.prefixCard) keyParts.push(pngKey(s.prefixCard));
     if (s.card === "arch") keyParts.push(pngKey("arch-1"), pngKey("arch-2"), pngKey("arch-3"), fmt(seg.narr.dur));

@@ -23,6 +23,10 @@
     document.head.appendChild(style);
     const c = document.createElement("div");
     c.id = "__cursor";
+    // Inline styles too: pages with a strict CSP (the PayPal checkout) drop the <style> element.
+    c.style.cssText = "position:fixed;left:0;top:0;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;" +
+      "background:rgba(14,59,67,0.62);border:2.5px solid #fff;box-shadow:0 1px 8px rgba(0,0,0,0.35);box-sizing:content-box;" +
+      "z-index:2147483647;pointer-events:none;transition:transform 0.12s ease, opacity 0.3s ease;";
     document.documentElement.appendChild(c);
     const saved = JSON.parse(sessionStorage.getItem("__cur") || "null") ?? { x: 1180, y: 640 };
     place(saved.x, saved.y);
@@ -58,13 +62,16 @@
 
   function ripple() {
     const c = document.getElementById("__cursor");
-    c?.classList.add("down");
-    setTimeout(() => c?.classList.remove("down"), 160);
+    if (c) c.style.transform = "scale(0.78)";
+    setTimeout(() => c && (c.style.transform = ""), 160);
     const r = document.createElement("div");
     r.className = "__ripple";
+    r.style.cssText = "position:fixed;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;box-sizing:border-box;" +
+      "border:3px solid rgba(15,118,110,0.85);z-index:2147483646;pointer-events:none;";
     r.style.left = `${pos.x / Z}px`;
     r.style.top = `${pos.y / Z}px`;
     document.documentElement.appendChild(r);
+    r.animate?.([{ transform: "scale(0.6)", opacity: 1 }, { transform: "scale(2.8)", opacity: 0 }], { duration: 550, easing: "ease-out", fill: "forwards" });
     setTimeout(() => r.remove(), 700);
   }
 
