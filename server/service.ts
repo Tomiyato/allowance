@@ -1,11 +1,29 @@
 // Business operations shared by the HTTP routes and the agent tools.
 // Every money-relevant step writes a ledger row. Policy always runs before the rail is called.
 import { z } from "zod";
-import { CATEGORY_VOCAB, type Mandate, type Product, type Purchase, type PurchaseItem } from "../shared/types.ts";
+import {
+  CATEGORY_VOCAB,
+  type BuyGiftPlanOutput,
+  type Mandate,
+  type Product,
+  type Purchase,
+  type PurchaseItem,
+  type Recipient,
+} from "../shared/types.ts";
 import { rail, PaymentError } from "./paypal/index.ts";
-import { evaluatePolicy, purchaseTotal, round2, type PolicyItem } from "./policy.ts";
+import { evaluatePolicy, purchaseTotal, round2, type PolicyItem, type PolicyRecipient } from "./policy.ts";
 import { injectionProduct, lookupCatalog } from "./products/index.ts";
-import { addLedger, newId, refreshMandateStatus, remaining, touch, withSessionLock, type Session } from "./store.ts";
+import {
+  addLedger,
+  mandatePurchases,
+  newId,
+  recipientStatuses,
+  refreshMandateStatus,
+  remaining,
+  touch,
+  withSessionLock,
+  type Session,
+} from "./store.ts";
 
 export class HttpError extends Error {
   constructor(
@@ -27,22 +45,82 @@ const categoryList = z
   .default([])
   .transform((xs) => [...new Set(xs.map((x) => x.trim().toLowerCase()))].filter((x) => vocab.safeParse(x).success));
 
-export const MandateInputSchema = z.object({
-  title: z.string().trim().min(1).max(120).default("My shopping mandate"),
-  budget_total: z.coerce.number().positive().max(100_000),
-  per_purchase_approval_over: z.coerce.number().min(0).max(100_000),
-  allowed_categories: categoryList,
-  blocked_categories: categoryList,
-  max_quantity_per_item: z.coerce.number().int().min(1).max(100).default(2),
-  expires_at: z.string().refine((s) => !Number.isNaN(Date.parse(s)), "expires_at must be an ISO date"),
+/** PayPal honours an authorization for 29 days, so a mandate never outlives its hold (GIFTLIST_SPEC decision 4). */
+export const PAYPAL_HOLD_DAYS = 29;
+export const MAX_RECIPIENTS = 12;
+
+export function maxExpiry(now = new Date()): Date {
+  return new Date(now.getTime() + PAYPAL_HOLD_DAYS * 864e5);
+}
+
+const isoSeconds = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
+
+export const RecipientInputSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().trim().min(1, "name is required").max(40),
+  envelope: z.coerce.number().positive("envelope must be more than $0").max(100_000),
+  interests: z.string().trim().max(120).default(""),
 });
+
+export const MandateInputSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120).default("My gift list"),
+    /** Required for a legacy mandate; with recipients it must equal the sum of the envelopes (or be omitted). */
+    budget_total: z.coerce.number().positive().max(100_000).optional(),
+    per_purchase_approval_over: z.coerce.number().min(0).max(100_000),
+    allowed_categories: categoryList,
+    blocked_categories: categoryList,
+    max_quantity_per_item: z.coerce.number().int().min(1).max(100).default(2),
+    expires_at: z
+      .string()
+      .refine((s) => !Number.isNaN(Date.parse(s)), "expires_at must be an ISO date")
+      .default(() => isoSeconds(maxExpiry())),
+    /** Gift list: one envelope per person. [] = legacy single-budget mandate. */
+    recipients: z.array(RecipientInputSchema).max(MAX_RECIPIENTS, `at most ${MAX_RECIPIENTS} people per gift list`).default([]),
+  })
+  .superRefine((v, ctx) => {
+    const seen = new Set<string>();
+    v.recipients.forEach((r, i) => {
+      const key = r.name.toLowerCase();
+      if (seen.has(key)) ctx.addIssue({ code: "custom", path: ["recipients", i, "name"], message: `"${r.name}" is on the list twice; names must be unique` });
+      seen.add(key);
+    });
+    if (v.recipients.length > 0) {
+      const sum = round2(v.recipients.reduce((t, r) => t + r.envelope, 0));
+      if (v.budget_total !== undefined && Math.abs(v.budget_total - sum) > 0.01 + 1e-9) {
+        ctx.addIssue({ code: "custom", path: ["budget_total"], message: `must equal the sum of the envelopes (${usd(sum)}), got ${usd(v.budget_total)}` });
+      }
+    } else if (v.budget_total === undefined) {
+      ctx.addIssue({ code: "custom", path: ["budget_total"], message: "is required" });
+    }
+  })
+  // Decision 1: with a gift list the total is the sum of the envelopes.
+  .transform((v) => ({
+    ...v,
+    budget_total: v.recipients.length > 0 ? round2(v.recipients.reduce((t, r) => t + r.envelope, 0)) : (v.budget_total as number),
+  }));
 
 export function endOfMonthUtc(now = new Date()): string {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59)).toISOString().replace(".000Z", "Z");
 }
 
-export function buildMandate(input: z.infer<typeof MandateInputSchema>, status: Mandate["status"] = "draft"): Mandate {
+export type MandateInput = z.output<typeof MandateInputSchema>;
+
+/** Keep a well-formed, unique client id (the draft's or the web editor's rcp_xxxxxxxx), else mint one. */
+function recipientIds(input: MandateInput): Recipient[] {
+  const used = new Set<string>();
+  return input.recipients.map((r) => {
+    let id = r.id && /^rcp_[A-Za-z0-9_-]{4,40}$/.test(r.id) && !used.has(r.id) ? r.id : newId("rcp");
+    while (used.has(id)) id = newId("rcp");
+    used.add(id);
+    return { id, name: r.name, envelope: round2(r.envelope), interests: r.interests };
+  });
+}
+
+export function buildMandate(input: MandateInput, status: Mandate["status"] = "draft", now = new Date()): Mandate {
   const blocked = input.blocked_categories;
+  // Decision 4: never later than the PayPal authorization can be held.
+  const expires = new Date(Math.min(Date.parse(input.expires_at), maxExpiry(now).getTime()));
   return {
     id: newId("mdt"),
     title: input.title,
@@ -53,28 +131,36 @@ export function buildMandate(input: z.infer<typeof MandateInputSchema>, status: 
     allowed_categories: input.allowed_categories.filter((c) => !blocked.includes(c)),
     blocked_categories: blocked,
     max_quantity_per_item: input.max_quantity_per_item,
-    expires_at: new Date(input.expires_at).toISOString().replace(".000Z", "Z"),
+    expires_at: isoSeconds(expires),
     status,
     paypal: { mode: rail.mode, authorization_id: null, vault_id: null, order_id: null },
     spent: 0,
     refunded: 0,
-    created_at: new Date().toISOString(),
+    created_at: now.toISOString(),
+    recipients: recipientIds(input),
   };
 }
 
+/** What users call this mandate in ledger text. */
+// User-visible text always says "gift list" (also for a legacy single-budget mandate); code keeps "mandate".
+const listWord = (_m: Mandate) => "Gift list";
+
 export function createMandate(s: Session, raw: unknown): Mandate {
   const parsed = MandateInputSchema.safeParse(raw);
-  if (!parsed.success) throw new HttpError(400, `Invalid mandate: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-  if (Date.parse(parsed.data.expires_at) <= Date.now()) throw new HttpError(400, "Invalid mandate: expires_at is in the past.");
+  if (!parsed.success) throw new HttpError(400, `Invalid gift list: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  if (Date.parse(parsed.data.expires_at) <= Date.now()) throw new HttpError(400, "Invalid gift list: expires_at is in the past.");
   if (s.mandate && s.mandate.status === "active") {
-    throw new HttpError(409, "An active mandate already exists. Revoke it before creating a new one.");
+    throw new HttpError(409, "An active gift list already exists. Revoke it before creating a new one.");
   }
   const m = buildMandate(parsed.data);
   s.mandate = m;
+  const people = m.recipients.length
+    ? ` for ${m.recipients.length} ${m.recipients.length === 1 ? "person" : "people"} (${m.recipients.map((r) => `${r.name} ${usd(r.envelope)}`).join(", ")})`
+    : " budget";
   addLedger(s, {
     actor: "user",
     action: "mandate.created",
-    summary: `Mandate "${m.title}": ${usd(m.budget_total)} budget, ask over ${usd(m.per_purchase_approval_over)}, blocked: ${m.blocked_categories.join(", ") || "none"}`,
+    summary: `${listWord(m)} "${m.title}": ${usd(m.budget_total)}${people}, ask over ${usd(m.per_purchase_approval_over)}, blocked: ${m.blocked_categories.join(", ") || "none"}`,
     amount: m.budget_total,
   });
   touch(s);
@@ -82,13 +168,13 @@ export function createMandate(s: Session, raw: unknown): Mandate {
 }
 
 function requireMandate(s: Session, id: string): Mandate {
-  if (!s.mandate || s.mandate.id !== id) throw new HttpError(404, "Mandate not found in this session.");
+  if (!s.mandate || s.mandate.id !== id) throw new HttpError(404, "Gift list not found in this session.");
   return s.mandate;
 }
 
 export async function startApproval(s: Session, id: string, baseUrl: string): Promise<string> {
   const m = requireMandate(s, id);
-  if (m.status !== "draft" && m.status !== "pending_paypal") throw new HttpError(409, `Mandate is ${m.status}; only a draft can be approved.`);
+  if (m.status !== "draft" && m.status !== "pending_paypal") throw new HttpError(409, `The gift list is ${m.status}; only a draft can be approved.`);
   const urls = {
     returnUrl: `${baseUrl}/paypal/return?mandate=${encodeURIComponent(m.id)}`,
     cancelUrl: `${baseUrl}/paypal/cancel?mandate=${encodeURIComponent(m.id)}`,
@@ -105,7 +191,7 @@ export async function startApproval(s: Session, id: string, baseUrl: string): Pr
   addLedger(s, {
     actor: "paypal",
     action: "mandate.approval_started",
-    summary: `Sent to PayPal to approve a ${usd(m.budget_total)} ${rail.mode === "authorization" ? "authorization hold" : rail.mode + " mandate"}`,
+    summary: `Sent to PayPal to approve a ${usd(m.budget_total)} ${rail.mode === "authorization" ? "authorization hold" : rail.mode === "mock" ? "MOCK gift list" : "gift list"}`,
     amount: m.budget_total,
     paypal_id: m.paypal.order_id,
   });
@@ -116,7 +202,7 @@ export async function startApproval(s: Session, id: string, baseUrl: string): Pr
 export async function finalizeApproval(s: Session, id: string, token: string): Promise<Mandate> {
   const m = requireMandate(s, id);
   if (m.status === "active") return m; // idempotent: a reload of the return URL
-  if (m.status !== "pending_paypal") throw new HttpError(409, `Mandate is ${m.status}, not awaiting PayPal.`);
+  if (m.status !== "pending_paypal") throw new HttpError(409, `The gift list is ${m.status}, not awaiting PayPal.`);
   try {
     Object.assign(m.paypal, await rail.finalize(m, token));
   } catch (e) {
@@ -130,10 +216,10 @@ export async function finalizeApproval(s: Session, id: string, token: string): P
     action: "mandate.activated",
     summary:
       rail.mode === "authorization"
-        ? `PayPal authorized ${usd(m.budget_total)}; the agent can now spend inside the mandate`
+        ? `PayPal authorized ${usd(m.budget_total)}; the agent can now spend inside the ${m.recipients.length ? "envelopes" : "gift list"}`
         : rail.mode === "mock"
-          ? `Mandate approved (MOCK rail, no real money); agent can spend up to ${usd(m.budget_total)}`
-          : `Mandate active; each purchase will be approved in PayPal`,
+          ? `${listWord(m)} approved (MOCK rail, no real money); agent can spend up to ${usd(m.budget_total)}`
+          : `${listWord(m)} active; each purchase will be approved in PayPal`,
     amount: m.budget_total,
     paypal_id: m.paypal.authorization_id ?? m.paypal.order_id,
   });
@@ -145,7 +231,7 @@ export function cancelApproval(s: Session, id: string) {
   const m = requireMandate(s, id);
   if (m.status === "pending_paypal") {
     m.status = "draft";
-    addLedger(s, { actor: "user", action: "mandate.approval_cancelled", summary: "PayPal approval cancelled; mandate is a draft again" });
+    addLedger(s, { actor: "user", action: "mandate.approval_cancelled", summary: `PayPal approval cancelled; the ${listWord(m).toLowerCase()} is a draft again` });
     touch(s);
   }
 }
@@ -154,10 +240,10 @@ export async function revokeMandate(s: Session, id: string): Promise<Mandate> {
   const m = requireMandate(s, id);
   return withSessionLock(s, async () => {
     if (m.status === "revoked") return m;
-    let voidId: string | null = null;
+    let voided: { paypal_id: string | null; nothing_to_void?: boolean } | null = null;
     if (m.status !== "draft") {
       try {
-        voidId = (await rail.revoke(m)).paypal_id;
+        voided = await rail.revoke(m);
       } catch (e) {
         // Still kill spending power on our side; the ledger records that PayPal disagreed.
         addLedger(s, { actor: "paypal", action: "paypal.error", summary: `PayPal void failed: ${errMsg(e)}` });
@@ -167,18 +253,22 @@ export async function revokeMandate(s: Session, id: string): Promise<Mandate> {
     for (const p of s.purchases) {
       if (p.mandate_id === m.id && p.status === "pending_approval") {
         p.status = "rejected";
-        p.reasons = [...p.reasons, "Mandate revoked before approval."];
+        p.reasons = [...p.reasons, `${listWord(m)} revoked before approval.`];
       }
     }
-    if (voidId) {
+    if (voided?.paypal_id) {
       addLedger(s, {
         actor: "paypal",
         action: "paypal.void",
-        summary: rail.mode === "mock" ? "MOCK authorization voided" : "PayPal authorization voided; remaining hold released",
-        paypal_id: voidId,
+        summary: voided.nothing_to_void
+          ? "Nothing left on the PayPal authorization to void"
+          : rail.mode === "mock"
+            ? "MOCK authorization voided"
+            : "PayPal authorization voided; remaining hold released",
+        paypal_id: voided.paypal_id,
       });
     }
-    addLedger(s, { actor: "user", action: "mandate.revoked", summary: `Mandate "${m.title}" revoked; the agent has no spending power`, remaining_budget: 0 });
+    addLedger(s, { actor: "user", action: "mandate.revoked", summary: `${listWord(m)} "${m.title}" revoked; the agent has no spending power`, remaining_budget: 0 });
     touch(s);
     return m;
   });
@@ -203,6 +293,7 @@ function resolveProduct(s: Session, id: string): Product | undefined {
 
 function policyItems(s: Session, items: PurchaseItem[]): PolicyItem[] {
   return items.map((i) => ({
+    product_id: i.product_id,
     title: i.title,
     price: i.price,
     qty: i.qty,
@@ -214,6 +305,37 @@ function policyItems(s: Session, items: PurchaseItem[]): PolicyItem[] {
 
 function describe(items: PurchaseItem[]): string {
   return items.map((i) => `${i.qty} x ${i.title}`).join(", ");
+}
+
+/** A gift-list person by id, or by name (case-insensitive) as a fallback for loose model input. */
+export function findRecipient(m: Mandate | null, idOrName: string | null | undefined): Recipient | null {
+  if (!m || !idOrName) return null;
+  const key = idOrName.trim();
+  return m.recipients.find((r) => r.id === key) ?? m.recipients.find((r) => r.name.toLowerCase() === key.toLowerCase()) ?? null;
+}
+
+/** " for Mom" when the purchase is for someone on the gift list, else "". */
+function forWho(s: Session, p: Purchase): string {
+  const r = p.recipient_id ? s.mandate?.recipients.find((x) => x.id === p.recipient_id) : undefined;
+  return r ? ` for ${r.name}` : "";
+}
+
+/** The person's envelope and what is already charged for them (decision 6: derived, refunds free it). */
+function policyRecipient(s: Session, r: Recipient | null): PolicyRecipient | null {
+  if (!r) return null;
+  const spent = round2(
+    mandatePurchases(s)
+      .filter((p) => p.recipient_id === r.id && p.status === "charged")
+      .reduce((t, p) => t + p.total, 0),
+  );
+  return { id: r.id, name: r.name, envelope: r.envelope, spent };
+}
+
+/** Products already bought or waiting for approval under this mandate (decision 3: no duplicate gifts). */
+function existingProductIds(s: Session, exceptPurchaseId: string): string[] {
+  return mandatePurchases(s)
+    .filter((p) => p.id !== exceptPurchaseId && (p.status === "charged" || p.status === "pending_approval"))
+    .flatMap((p) => p.items.map((i) => i.product_id));
 }
 
 /** Where a purchase proposal came from. Only the ledger label differs; policy and rail are the same. */
@@ -241,7 +363,7 @@ async function chargeNow(s: Session, p: Purchase, baseUrl: string, label = "") {
       p.paypal.order_id = r.order_id;
       p.paypal.approve_url = r.approveUrl;
       p.error = null;
-      addLedger(s, { actor: "paypal", action: "paypal.order_created", summary: `${label}Waiting for buyer approval in PayPal: ${describe(p.items)}`, amount: p.total, paypal_id: r.order_id, purchase_id: p.id });
+      addLedger(s, { actor: "paypal", action: "paypal.order_created", summary: `${label}Waiting for buyer approval in PayPal: ${describe(p.items)}${forWho(s, p)}`, amount: p.total, paypal_id: r.order_id, purchase_id: p.id });
       return;
     }
     p.status = "charged";
@@ -251,7 +373,7 @@ async function chargeNow(s: Session, p: Purchase, baseUrl: string, label = "") {
     addLedger(s, {
       actor: "paypal",
       action: "paypal.capture",
-      summary: `${label}${rail.mode === "mock" ? "MOCK capture" : "PayPal captured"} ${usd(p.total)} for ${describe(p.items)}`,
+      summary: `${label}${rail.mode === "mock" ? "MOCK capture" : "PayPal captured"} ${usd(p.total)} for ${describe(p.items)}${forWho(s, p)}`,
       amount: p.total,
       paypal_id: r.capture_id,
       purchase_id: p.id,
@@ -263,7 +385,7 @@ async function chargeNow(s: Session, p: Purchase, baseUrl: string, label = "") {
     addLedger(s, {
       actor: "paypal",
       action: "paypal.error",
-      summary: `${label}Charge failed for ${describe(p.items)}: ${p.error}`,
+      summary: `${label}Charge failed for ${describe(p.items)}${forWho(s, p)}: ${p.error}`,
       amount: p.total,
       paypal_id: e instanceof PaymentError ? (e.debugId ?? null) : null,
       purchase_id: p.id,
@@ -277,6 +399,8 @@ export async function proposePurchase(
   rationale: string,
   baseUrl: string,
   origin: ProposalOrigin = "agent",
+  /** Gift list: who this is for (id, or name as a fallback). Ignored on a legacy mandate. */
+  recipientId?: string | null,
 ): Promise<Purchase> {
   const label = origin === "redteam" ? SIMULATION_PREFIX : "";
   return withSessionLock(s, async () => {
@@ -303,6 +427,9 @@ export async function proposePurchase(
       });
     }
     const total = purchaseTotal(resolved);
+    const giftList = (m?.recipients.length ?? 0) > 0;
+    const recipient = giftList ? findRecipient(m, recipientId) : null;
+    const unknownRecipient = giftList && recipientId && !recipient ? recipientId : null;
     const p: Purchase = {
       id: newId("pur"),
       mandate_id: m?.id ?? "none",
@@ -315,19 +442,31 @@ export async function proposePurchase(
       paypal: { order_id: null, capture_id: null, refund_id: null, approve_url: null },
       error: null,
       created_at: new Date().toISOString(),
+      recipient_id: recipient?.id ?? null,
     };
     s.purchases.push(p);
     addLedger(s, {
       actor: "agent",
       action: origin === "redteam" ? "agent.hijacked_attempt" : "purchase.proposed",
-      summary: `${label}${origin === "redteam" ? "Hijacked agent" : "Agent"} proposed ${describe(resolved) || "(no known items)"} for ${usd(total)}${rationale ? ` — "${rationale.slice(0, 140)}"` : ""}`,
+      summary: `${label}${origin === "redteam" ? "Hijacked agent" : "Agent"} proposed ${describe(resolved) || "(no known items)"} for ${usd(total)}${recipient ? `, a gift for ${recipient.name}` : ""}${rationale ? ` — "${rationale.slice(0, 140)}"` : ""}`,
       amount: total,
       purchase_id: p.id,
     });
 
-    const policy = unknown.length
-      ? { decision: "deny" as const, reasons: [`Unknown product id(s) ${unknown.join(", ")}: the agent may only buy products returned by search_products.`] }
-      : evaluatePolicy({ mandate: m, items: policyItems(s, resolved), now: new Date() });
+    const pre: string[] = [];
+    if (unknown.length) pre.push(`Unknown product id(s) ${unknown.join(", ")}: the agent may only buy products returned by search_products.`);
+    if (unknownRecipient) {
+      pre.push(`"${unknownRecipient.slice(0, 60)}" is not on the gift list (${m!.recipients.map((r) => `${r.name} = ${r.id}`).join(", ")}).`);
+    }
+    const policy = pre.length
+      ? { decision: "deny" as const, reasons: pre }
+      : evaluatePolicy({
+          mandate: m,
+          items: policyItems(s, resolved),
+          now: new Date(),
+          recipient: policyRecipient(s, recipient),
+          existingProductIds: existingProductIds(s, p.id),
+        });
     p.decision = policy.decision;
     p.reasons = policy.reasons;
     addLedger(s, {
@@ -369,7 +508,37 @@ export async function simulateHijackedAgent(s: Session, baseUrl: string): Promis
   // simulation works whatever the product source (Channel3 results may not include it).
   const inj = injectionProduct();
   s.products[inj.id] = inj;
-  return proposePurchase(s, [{ product_id: inj.id, qty: HIJACK_QTY }], HIJACK_RATIONALE, baseUrl, "redteam");
+  // Gift list: the hijacked agent buys "for" the first person on the list (Mom in the demo).
+  return proposePurchase(s, [{ product_id: inj.id, qty: HIJACK_QTY }], HIJACK_RATIONALE, baseUrl, "redteam", s.mandate?.recipients[0]?.id ?? null);
+}
+
+export interface GiftPlanEntry {
+  recipient_id: string;
+  product_id: string;
+  rationale: string;
+}
+
+/**
+ * Buy one gift per plan entry, in order, each through proposePurchase (policy, then the rail).
+ * Sequential on purpose: each entry sees the envelopes, budget and duplicates left by the ones before.
+ */
+export async function buyGiftPlan(s: Session, plan: GiftPlanEntry[], baseUrl: string): Promise<BuyGiftPlanOutput> {
+  const results: BuyGiftPlanOutput["results"] = [];
+  for (const e of plan) {
+    const r = findRecipient(s.mandate, e.recipient_id);
+    const row = { recipient_id: r?.id ?? e.recipient_id, recipient_name: r?.name ?? e.recipient_id };
+    if (s.mandate && s.mandate.recipients.length === 0) {
+      results.push({ ...row, purchase: null, error: "This gift list has no people on it; use propose_purchase." });
+      continue;
+    }
+    try {
+      const purchase = await proposePurchase(s, [{ product_id: e.product_id, qty: 1 }], e.rationale, baseUrl, "agent", e.recipient_id);
+      results.push({ ...row, purchase, error: purchase.status === "failed" ? purchase.error : null });
+    } catch (err) {
+      results.push({ ...row, purchase: null, error: errMsg(err) });
+    }
+  }
+  return { results, remaining: remaining(s), recipients: recipientStatuses(s) };
 }
 
 /** Defence layer 1: the model reported a listing whose text tries to instruct it. Returns the product title. */
@@ -394,9 +563,16 @@ export async function approvePurchase(s: Session, id: string, baseUrl: string): 
       throw new HttpError(409, "This purchase waits for approval inside PayPal, not here.");
     }
     refreshMandateStatus(s);
-    addLedger(s, { actor: "user", action: "purchase.approved", summary: `You approved ${describe(p.items)} (${usd(p.total)})`, amount: p.total, purchase_id: p.id });
-    // Re-check every hard limit: budget or status may have changed since the proposal.
-    const policy = evaluatePolicy({ mandate: s.mandate, items: policyItems(s, p.items), now: new Date(), humanApproved: true });
+    addLedger(s, { actor: "user", action: "purchase.approved", summary: `You approved ${describe(p.items)}${forWho(s, p)} (${usd(p.total)})`, amount: p.total, purchase_id: p.id });
+    // Re-check every hard limit: budget, envelope, duplicates or status may have changed since the proposal.
+    const policy = evaluatePolicy({
+      mandate: s.mandate,
+      items: policyItems(s, p.items),
+      now: new Date(),
+      humanApproved: true,
+      recipient: policyRecipient(s, findRecipient(s.mandate, p.recipient_id)),
+      existingProductIds: existingProductIds(s, p.id),
+    });
     p.decision = policy.decision;
     p.reasons = [...p.reasons, ...policy.reasons];
     addLedger(s, { actor: "policy", action: `policy.${policy.decision}`, summary: `${policy.decision === "allow" ? "Allowed after approval" : "Blocked after approval"}: ${policy.reasons.join(" ")}`, amount: p.total, decision: policy.decision, reasons: policy.reasons, purchase_id: p.id });
@@ -411,7 +587,7 @@ export function rejectPurchase(s: Session, id: string): Purchase {
   const p = findPurchase(s, id);
   if (p.status !== "pending_approval") throw new HttpError(409, `Purchase is ${p.status}, not awaiting approval.`);
   p.status = "rejected";
-  addLedger(s, { actor: "user", action: "purchase.rejected", summary: `You declined ${describe(p.items)} (${usd(p.total)}); nothing was charged`, amount: p.total, purchase_id: p.id });
+  addLedger(s, { actor: "user", action: "purchase.rejected", summary: `You declined ${describe(p.items)}${forWho(s, p)} (${usd(p.total)}); nothing was charged`, amount: p.total, purchase_id: p.id });
   touch(s);
   return p;
 }
@@ -428,7 +604,7 @@ export async function completePurchaseApproval(s: Session, id: string): Promise<
       p.paypal.capture_id = capture_id;
       p.paypal.approve_url = null;
       s.mandate!.spent = round2(s.mandate!.spent + p.total);
-      addLedger(s, { actor: "paypal", action: "paypal.capture", summary: `PayPal captured ${usd(p.total)} for ${describe(p.items)}`, amount: p.total, paypal_id: capture_id, purchase_id: p.id });
+      addLedger(s, { actor: "paypal", action: "paypal.capture", summary: `PayPal captured ${usd(p.total)} for ${describe(p.items)}${forWho(s, p)}`, amount: p.total, paypal_id: capture_id, purchase_id: p.id });
       refreshMandateStatus(s);
     } catch (e) {
       p.status = "failed";
@@ -445,7 +621,8 @@ export async function refundPurchase(s: Session, id: string, reason: string, act
     const p = findPurchase(s, id);
     if (p.status !== "charged" || !p.paypal.capture_id) throw new HttpError(409, `Purchase is ${p.status}; only a charged purchase can be refunded.`);
     const m = s.mandate && s.mandate.id === p.mandate_id ? s.mandate : null;
-    addLedger(s, { actor, action: "refund.requested", summary: `Refund requested for ${describe(p.items)}${reason ? `: ${reason.slice(0, 140)}` : ""}`, amount: p.total, purchase_id: p.id });
+    const who = findRecipient(m, p.recipient_id);
+    addLedger(s, { actor, action: "refund.requested", summary: `Refund requested for ${describe(p.items)}${forWho(s, p)}${reason ? `: ${reason.slice(0, 140)}` : ""}`, amount: p.total, purchase_id: p.id });
     try {
       const { refund_id } = await rail.refund(m ?? (s.mandate as Mandate), p.paypal.capture_id, p.total, p.id);
       p.status = "refunded";
@@ -455,7 +632,7 @@ export async function refundPurchase(s: Session, id: string, reason: string, act
       addLedger(s, {
         actor: "paypal",
         action: "paypal.refund",
-        summary: `${rail.mode === "mock" ? "MOCK refund" : "PayPal refunded"} ${usd(p.total)} for ${describe(p.items)}; budget restored`,
+        summary: `${rail.mode === "mock" ? "MOCK refund" : "PayPal refunded"} ${usd(p.total)} for ${describe(p.items)}${forWho(s, p)}; ${who ? `${who.name}'s envelope and the budget` : "budget"} restored`,
         amount: -p.total,
         paypal_id: refund_id,
         purchase_id: p.id,
@@ -470,13 +647,21 @@ export async function refundPurchase(s: Session, id: string, reason: string, act
   });
 }
 
-export function recordSearch(s: Session, query: string, source: "channel3" | "catalog", products: Product[], fallback?: string) {
+export function recordSearch(
+  s: Session,
+  query: string,
+  source: "channel3" | "catalog",
+  products: Product[],
+  fallback?: string,
+  recipient?: Recipient | null,
+) {
   for (const p of products) s.products[p.id] = p;
   s.last_source = source;
   addLedger(s, {
     actor: "agent",
     action: "search",
-    summary: `Searched ${source} for "${query.slice(0, 80)}": ${products.length} result(s)${fallback ? " (Channel3 unavailable, used catalog)" : ""}`,
+    summary: `Searched ${source} for "${query.slice(0, 80)}"${recipient ? ` for ${recipient.name}` : ""}: ${products.length} result(s)${fallback ? " (Channel3 unavailable, used catalog)" : ""}`,
+    recipient_id: recipient?.id ?? null,
   });
   touch(s);
 }

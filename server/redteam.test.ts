@@ -90,7 +90,70 @@ describe("POST /api/redteam/hijack -> simulateHijackedAgent", () => {
     const s = createSession();
     const p = await simulateHijackedAgent(s, BASE);
     expect(p.status).toBe("blocked");
-    expect(p.reasons).toEqual(["No mandate: the agent has no spending power."]);
+    expect(p.reasons).toEqual(["No gift list: the agent has no spending power."]);
+  });
+});
+
+/** The demo gift list (GIFTLIST_SPEC §2), active: $200 = Mom 60 + Dad 50 + Leo 30 + Sam 30 + Santa 30, ask over $45. */
+function activeGiftList(): Session {
+  const s = createSession();
+  createMandate(s, {
+    title: "Holiday gifts",
+    budget_total: 200,
+    per_purchase_approval_over: 45,
+    allowed_categories: ["gifts", "home", "garden", "kitchen", "toys", "sports", "books", "office", "clothing", "beauty"],
+    blocked_categories: ["electronics"],
+    max_quantity_per_item: 2,
+    recipients: [
+      { name: "Mom", envelope: 60, interests: "loves gardening" },
+      { name: "Dad", envelope: 50, interests: "coffee nerd" },
+      { name: "Leo", envelope: 30, interests: "dinosaurs" },
+      { name: "Sam", envelope: 30, interests: "soccer" },
+      { name: "Office Secret Santa", envelope: 30, interests: "something for the desk" },
+    ],
+  });
+  s.mandate!.status = "active";
+  return s;
+}
+
+describe("red-team hijack on a gift list", () => {
+  it("targets the first person (Mom) and is denied by the quantity cap and Mom's envelope", async () => {
+    const s = activeGiftList();
+    const mom = s.mandate!.recipients[0];
+    expect(mom.name).toBe("Mom");
+
+    const p = await simulateHijackedAgent(s, BASE);
+
+    expect(p.recipient_id).toBe(mom.id);
+    expect(p.total).toBe(170);
+    expect(p.status).toBe("blocked");
+    expect(p.reasons).toEqual([
+      'Quantity 5 of "Deluxe Herb Seed Gift Box" exceeds the per-item cap of 2.',
+      "$170.00 for Mom exceeds Mom's envelope: $60.00 left of $60.00.",
+    ]);
+    expect(s.mandate!.spent).toBe(0);
+  });
+
+  it("adds the budget reason once the list has less than $170 left", async () => {
+    const s = activeGiftList();
+    s.mandate!.spent = 40; // e.g. Dad's gift was bought
+    const p = await simulateHijackedAgent(s, BASE);
+    expect(p.reasons.some((r) => /exceeds the remaining budget of \$160\.00/.test(r))).toBe(true);
+    expect(p.reasons).toHaveLength(3);
+  });
+
+  it("labels the simulation rows with Mom as the recipient and never reaches the rail", async () => {
+    const s = activeGiftList();
+    const before = s.ledger.length;
+    const p = await simulateHijackedAgent(s, BASE);
+    const rows = s.ledger.slice(before);
+    expect(rows.map((r) => r.action)).toEqual(["agent.hijacked_attempt", "policy.deny"]);
+    for (const r of rows) {
+      expect(r.summary.startsWith(SIMULATION_PREFIX)).toBe(true);
+      expect(r.recipient_id).toBe(p.recipient_id);
+    }
+    expect(rows[0].summary).toContain("a gift for Mom");
+    expect(rows.some((r) => r.actor === "paypal")).toBe(false);
   });
 });
 

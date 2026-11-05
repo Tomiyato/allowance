@@ -1,8 +1,10 @@
-// Deterministic spending-policy engine (SPEC §4). Pure: no I/O, no clock reads, no LLM.
+// Deterministic spending-policy engine (SPEC §4, gift-list checks: GIFTLIST_SPEC §4). Pure: no I/O, no clock reads, no LLM.
 // The LLM can only *propose*; this function decides whether money may move.
 import type { Mandate, PolicyResult } from "../shared/types.ts";
 
 export interface PolicyItem {
+  /** Product id; needed for the gift-list duplicate check. */
+  product_id?: string;
   title: string;
   price: number; // unit price, dollars
   qty: number;
@@ -18,6 +20,19 @@ export interface PolicyInput {
   /** True when a human already approved this exact purchase: the approval threshold
    *  and low-confidence checks no longer apply, every hard limit still does. */
   humanApproved?: boolean;
+  /** Gift list: who the purchase is for, with that person's envelope and what is already charged
+   *  for them. Only read when the mandate has recipients; null/undefined there = no recipient named. */
+  recipient?: PolicyRecipient | null;
+  /** Gift list: product ids already in a charged or pending_approval purchase of this mandate
+   *  (excluding the purchase being evaluated). */
+  existingProductIds?: string[];
+}
+
+export interface PolicyRecipient {
+  id: string;
+  name: string;
+  envelope: number;
+  spent: number;
 }
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -35,12 +50,12 @@ export function evaluatePolicy(input: PolicyInput): PolicyResult {
   const { mandate: m, items, now } = input;
 
   // 1. Mandate status and expiry — nothing else matters if there is no spending power.
-  if (!m) return { decision: "deny", reasons: ["No mandate: the agent has no spending power."] };
+  if (!m) return { decision: "deny", reasons: ["No gift list: the agent has no spending power."] };
   if (m.status !== "active") {
-    return { decision: "deny", reasons: [`Mandate is ${m.status}, not active.`] };
+    return { decision: "deny", reasons: [`The gift list is ${m.status}, not active.`] };
   }
   if (now.getTime() > Date.parse(m.expires_at)) {
-    return { decision: "deny", reasons: [`Mandate expired at ${m.expires_at}.`] };
+    return { decision: "deny", reasons: [`The gift list expired at ${m.expires_at}.`] };
   }
   if (items.length === 0) return { decision: "deny", reasons: ["Purchase has no items."] };
 
@@ -57,7 +72,7 @@ export function evaluatePolicy(input: PolicyInput): PolicyResult {
   const allowed = new Set(m.allowed_categories.map((c) => c.toLowerCase()));
   for (const it of items) {
     const cat = it.category.toLowerCase();
-    if (blocked.has(cat)) deny.push(`Category "${cat}" is blocked by the mandate ("${it.title}").`);
+    if (blocked.has(cat)) deny.push(`Category "${cat}" is blocked on this gift list ("${it.title}").`);
     else if (allowed.size > 0 && !allowed.has(cat)) {
       deny.push(`Category "${cat}" is not in the allowed categories (${[...allowed].join(", ")}) ("${it.title}").`);
     }
@@ -84,9 +99,29 @@ export function evaluatePolicy(input: PolicyInput): PolicyResult {
     deny.push(`Total ${usd(total)} exceeds the remaining budget of ${usd(remaining)}.`);
   }
 
+  // 6. Gift list (only when the mandate has recipients): every purchase names a person, fits that
+  //    person's envelope, and never repeats a gift already bought or waiting for approval.
+  if ((m.recipients?.length ?? 0) > 0) {
+    const r = input.recipient;
+    if (!r) {
+      deny.push("Pick who this gift is for: every purchase must name someone on the list.");
+    } else {
+      const left = round2(r.envelope - r.spent);
+      if (total > left + 1e-9) {
+        deny.push(`${usd(total)} for ${r.name} exceeds ${r.name}'s envelope: ${usd(Math.max(0, left))} left of ${usd(r.envelope)}.`);
+      }
+    }
+    const taken = new Set(input.existingProductIds ?? []);
+    for (const it of items) {
+      if (it.product_id && taken.has(it.product_id)) {
+        deny.push(`${it.title} is already bought for someone on the list; no duplicate gifts.`);
+      }
+    }
+  }
+
   if (deny.length > 0) return { decision: "deny", reasons: deny };
 
-  // 6. Approval threshold (strictly "over": exactly the threshold is allowed).
+  // 7. Approval threshold (strictly "over": exactly the threshold is allowed).
   if (total > m.per_purchase_approval_over + 1e-9 && !input.humanApproved) {
     ask.push(`Total ${usd(total)} is over the ${usd(m.per_purchase_approval_over)} ask-me-first threshold.`);
   }
@@ -98,7 +133,7 @@ export function evaluatePolicy(input: PolicyInput): PolicyResult {
     reasons: [
       input.humanApproved
         ? `Approved by the user; ${usd(total)} fits the remaining ${usd(remaining)}.`
-        : `Within mandate: ${usd(total)} of ${usd(remaining)} remaining, categories allowed, quantity within cap.`,
+        : `Within the gift list: ${usd(total)} of ${usd(remaining)} remaining, categories allowed, quantity within cap.`,
     ],
   };
 }

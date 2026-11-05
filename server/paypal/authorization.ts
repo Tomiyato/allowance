@@ -23,7 +23,7 @@ export function createAuthorizationRail(): PaymentRail {
             {
               reference_id: m.id,
               custom_id: m.id,
-              description: `Allowance mandate: ${m.title}`.slice(0, 127),
+              description: `Gift list: ${m.title}`.slice(0, 127),
               amount: money(m.budget_total),
             },
           ],
@@ -47,7 +47,7 @@ export function createAuthorizationRail(): PaymentRail {
     async finalize(m, token) {
       const orderId = m.paypal.order_id ?? token;
       if (token && m.paypal.order_id && token !== m.paypal.order_id) {
-        throw new PaymentError(`Return token ${token} does not match the mandate's order ${m.paypal.order_id}.`);
+        throw new PaymentError(`Return token ${token} does not match the gift list's order ${m.paypal.order_id}.`);
       }
       const res = await paypal({
         method: "POST",
@@ -65,7 +65,7 @@ export function createAuthorizationRail(): PaymentRail {
 
     // Verified against the PayPal sandbox on 2026-11-04 (see docs/research/paypal-sandbox-results.md).
     async charge(m, req) {
-      if (!m.paypal.authorization_id) throw new PaymentError("Mandate has no PayPal authorization.");
+      if (!m.paypal.authorization_id) throw new PaymentError("The gift list has no PayPal authorization.");
       const cap = await paypal({
         method: "POST",
         path: `/v2/payments/authorizations/${m.paypal.authorization_id}/capture`,
@@ -107,10 +107,13 @@ export function createAuthorizationRail(): PaymentRail {
           requestId: `${m.id}-void`,
         });
       } catch (e) {
-        // Fully captured or already voided authorizations cannot be voided; nothing is left to hold then.
+        // Fully captured or already voided authorizations cannot be voided (422, e.g.
+        // PREVIOUSLY_CAPTURED); nothing is left to hold then, so say so instead of "voided".
         if (e instanceof PaymentError && e.status === 422) {
-          console.warn(`[paypal] void returned 422 (likely already captured/voided): ${e.message}`);
-        } else throw e;
+          console.warn(`[paypal] void returned 422 (nothing left on the authorization): ${e.message}`);
+          return { paypal_id: m.paypal.authorization_id, nothing_to_void: true };
+        }
+        throw e;
       }
       return { paypal_id: m.paypal.authorization_id };
     },

@@ -2,11 +2,14 @@ import { useChat } from "@ai-sdk/react";
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
 import type {
+  BuyGiftPlanOutput,
   GetMandateOutput,
   ListPurchasesOutput,
+  MandateStatus,
   ProposePurchaseOutput,
   ReportSuspiciousOutput,
   RequestRefundOutput,
+  SearchGiftsOutput,
   SearchProductsOutput,
 } from "../../../shared/types";
 import { api } from "../api";
@@ -14,6 +17,8 @@ import { Markdown } from "../components/Markdown";
 import {
   FlaggedCard,
   GenericToolCard,
+  GiftPlanCard,
+  GiftSearchCard,
   MandateCheckCard,
   ProductStrip,
   PurchaseCard,
@@ -27,14 +32,18 @@ import { money } from "../format";
 import { Link } from "../router";
 import { useStore, type Simulation } from "../store";
 
-const SUGGESTIONS = [
-  "Find a gardening gift for my mom around $40",
-  "Order a robot vacuum",
-  "What have I spent so far?",
-  "Return the last purchase",
-];
+const SUGGESTIONS = ["Shop my whole gift list", "Find Mom something under $60", "Order a robot vacuum", "Return Sam's gift"];
 
 type Part = UIMessage["parts"][number];
+
+const listStatus: Record<MandateStatus, string> = {
+  draft: "still a draft",
+  pending_paypal: "waiting for PayPal",
+  active: "active",
+  revoked: "revoked",
+  expired: "expired",
+  exhausted: "used up",
+};
 
 /** A non-2xx /api/chat response surfaces as the raw body; unwrap the server's { error } JSON. */
 function chatErrorText(msg: string): string {
@@ -61,6 +70,14 @@ function ToolPart({ part }: { part: Part }) {
   switch (name) {
     case "search_products":
       return <ProductStrip output={output as SearchProductsOutput} />;
+    case "search_gifts": {
+      const o = output as SearchGiftsOutput;
+      return Array.isArray(o.results) ? <GiftSearchCard output={o} /> : <GenericToolCard name={name} output={output} />;
+    }
+    case "buy_gift_plan": {
+      const o = output as BuyGiftPlanOutput;
+      return Array.isArray(o.results) ? <GiftPlanCard output={o} /> : <GenericToolCard name={name} output={output} />;
+    }
     case "propose_purchase": {
       const o = output as ProposePurchaseOutput;
       return o.purchase ? <PurchaseCard purchase={o.purchase} /> : <GenericToolCard name={name} output={output} />;
@@ -139,7 +156,7 @@ function SafetyDemo({ onRun, busy, disabled }: { onRun: () => void; busy: boolea
       <Icon name="shield" size={18} />
       <p>
         <span className="safety-label">Safety demo</span>
-        <span className="safety-line">The model can be fooled. The mandate can't.</span>
+        <span className="safety-line">The model can be fooled. Your gift list can't.</span>
       </p>
       <button type="button" className="btn btn-secondary btn-sm" onClick={onRun} disabled={disabled || busy}>
         {busy ? <span className="spinner" /> : <Icon name="shieldX" size={15} />}
@@ -197,7 +214,7 @@ export function AgentPage() {
     <div className="page page-chat">
       <header className="page-head compact">
         <p className="eyebrow">Step 2 · Agent</p>
-        <h1>Your shopping agent</h1>
+        <h1>Your gift-shopping agent</h1>
       </header>
 
       <SafetyDemo onRun={() => void simulate()} busy={simBusy} disabled={busy || !state} />
@@ -206,15 +223,15 @@ export function AgentPage() {
         <div className="no-mandate fade-in" role="status">
           <Icon name="shield" size={22} />
           <div>
-            <strong>{m ? `The mandate is ${m.status.replace("_", " ")}.` : "No active mandate."}</strong>
+            <strong>{m ? `The gift list is ${listStatus[m.status]}.` : "No active gift list."}</strong>
             <span>
               {m?.status === "revoked"
                 ? "The agent has no spending power. It can still search, but any purchase will be refused."
-                : "The agent can search, but it cannot buy anything until you approve a mandate."}
+                : "The agent can search, but it cannot buy anything until you approve a gift list with PayPal."}
             </span>
           </div>
           <Link to="/mandate" className="btn btn-primary btn-sm">
-            {m && (m.status === "draft" || m.status === "pending_paypal") ? "Finish mandate" : "Create a mandate"}
+            {m && (m.status === "draft" || m.status === "pending_paypal") ? "Finish gift list" : "Create a gift list"}
           </Link>
         </div>
       )}
@@ -224,8 +241,8 @@ export function AgentPage() {
           <div className="chat-empty">
             <Icon name="bot" size={28} />
             <p>
-              Ask for an errand. The agent shops on its own inside your mandate
-              {canSpend && m ? ` (${money(state?.remaining ?? 0)} left)` : ""} and asks you when a rule says so.
+              Ask the agent to shop your list. It buys one gift per person inside that person's envelope
+              {canSpend && m ? ` (${money(state?.remaining ?? 0)} left in total)` : ""} and asks you when a rule says so.
             </p>
           </div>
         )}
@@ -289,7 +306,7 @@ export function AgentPage() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask the agent to find, buy or return something…"
+            placeholder="Ask the agent to find, buy or return a gift…"
             aria-label="Message the agent"
           />
           {busy ? (

@@ -21,6 +21,15 @@ Where a fetch returned a summary rather than raw page text, the field names stil
 ### 1.1 Access
 - The user's URL `https://paypal-ai-hackathon.devpost.com/` returned **HTTP 404** to curl (also `/rules`), and **HTTP 403** to WebFetch. Source: Bash `curl -L` on the URL, 2026-11-03.
 - `https://paypalaihackathon.devpost.com/` returned **403** to WebFetch. Devpost pages (/, /resources, /rules, /updates) could not be read directly. **UNVERIFIED:** resources list, rules, judging criteria, eligibility, team size, country limits.
+- **Update 2026-11-05:** the official rules were read in the in-app browser at https://paypalaihackathon.devpost.com/rules (VERIFIED):
+  - Submission period ends **Thu Nov 12, 2026, 12:00 pm PT** (= Nov 13, 01:00 GMT+5). Judging Dec 1–15; winners around Dec 21.
+  - Stage 1 is pass/fail: fits the theme and applies the required APIs. Stage 2 has five equally weighted criteria. **Technological Implementation**: thorough use of the PayPal platform and AI, working and non-trivial. **Design**: a complete, coherent product, not a PoC. **Potential Impact**: a credible, specific case for a real audience. **Innovation/Idea**: "does the project differ from existing concepts?". **Presentation**: the video shows it working end to end, plus problem, audience and why it matters. Ties are broken in that order.
+  - Video: under 3 minutes, public on YouTube, shows the project working. No third-party trademarks or copyrighted music without permission.
+  - Repo: public, with an OSS license detectable in the GitHub About section. A hosted URL or setup instructions are required. Test credentials go in the testing instructions. Materials are in English.
+  - Not open to residents of Brazil, Quebec, Russia, Crimea, Cuba, Iran, North Korea or other OFAC-sanctioned places.
+  - A project can win at most one Grand Prize (or Honorable Mention) plus one Sponsor Prize. Sponsor prizes: AG Grid ($5k/$2k/3×$1k), APIMatic, Bryntum, Channel3 ($1.5k), Render (credits).
+  - Judges may score from the text, images and video alone, without running the app.
+  - The project gallery was not published as of 2026-11-05.
 - PayPal's blog says the "Get started here" link goes to `https://paypalaihackathon.devpost.com/`. Source: https://developer.paypal.com/community/blog/PayPal_AI_Hackathon (VERIFIED, read via WebFetch summary). Use this host unless Devpost says otherwise.
 
 ### 1.2 Dates (PayPal blog, published 2026-09-30)

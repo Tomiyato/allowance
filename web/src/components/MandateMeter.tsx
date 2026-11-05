@@ -30,8 +30,8 @@ export function MandateMeter() {
   }
   if (!m) {
     return (
-      <Link to="/mandate" className="meter meter-empty" title="Create a mandate">
-        <span className="meter-label">No mandate</span>
+      <Link to="/mandate" className="meter meter-empty" title="Create a gift list">
+        <span className="meter-label">No gift list</span>
         <span className="meter-sub">Agent cannot spend</span>
       </Link>
     );
@@ -45,7 +45,7 @@ export function MandateMeter() {
     <Link
       to="/mandate"
       className={`meter ${live ? "" : "meter-inactive"}`}
-      aria-label={`Mandate ${statusLabel[m.status]}: ${money(remaining)} left of ${money(m.budget_total)}`}
+      aria-label={`Gift list ${statusLabel[m.status]}: ${money(remaining)} left of ${money(m.budget_total)}`}
     >
       <div className="meter-top">
         <span className="meter-amount">

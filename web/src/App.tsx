@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect } from "react";
 import { isFixture } from "./api";
-import { BrandMark, Icon } from "./components/Icon";
+import { Bow, BrandMark, Icon } from "./components/Icon";
 import { MandateMeter } from "./components/MandateMeter";
 import { AgentPage } from "./pages/AgentPage";
 import { MandatePage } from "./pages/MandatePage";
@@ -11,7 +11,7 @@ import { useStore } from "./store";
 const LedgerPage = lazy(() => import("./pages/LedgerPage").then((m) => ({ default: m.LedgerPage })));
 
 const NAV = [
-  { to: "/mandate", label: "Mandate", match: ["/", "/mandate"] },
+  { to: "/mandate", label: "Gift list", match: ["/", "/mandate"] },
   { to: "/agent", label: "Agent", match: ["/agent"] },
   { to: "/ledger", label: "Ledger", match: ["/ledger"] },
 ];
@@ -25,8 +25,8 @@ export function App() {
   }, [path, refresh]);
 
   useEffect(() => {
-    const page = NAV.find((n) => n.match.includes(path))?.label ?? "Mandate";
-    document.title = `${page} · Allowance`;
+    const page = NAV.find((n) => n.match.includes(path))?.label ?? "Gift list";
+    document.title = `${page} · Ribbon`;
   }, [path]);
 
   let page;
@@ -38,9 +38,14 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <div className="topbar-inner">
-          <Link to="/mandate" className="brand" aria-label="Allowance home">
+          <Link to="/mandate" className="brand" aria-label="Ribbon home">
             <BrandMark />
-            <span className="brand-name">Allowance</span>
+            <span className="brand-name" aria-hidden>
+              <span className="brand-r">
+                R<Bow className="brand-bow" />
+              </span>
+              ibbon
+            </span>
           </Link>
           <nav className="nav" aria-label="Main">
             {NAV.map((n) => (
@@ -74,7 +79,7 @@ function OfflineBanner() {
       <div className="offline" role="alert">
         <Icon name="alert" size={20} />
         <div>
-          <strong>Cannot reach the Allowance server.</strong>
+          <strong>Cannot reach the Ribbon server.</strong>
           <span>
             {loadError}. Start the backend, or preview the UI with <a href="?fixture=1">fixture data</a>.
           </span>
@@ -98,7 +103,7 @@ function Footer() {
   return (
     <footer className="footer">
       <div className="footer-inner">
-        <span className="tagline">Give your AI agent an allowance, not your wallet.</span>
+        <span className="tagline">Every gift on your list, tied to one PayPal approval.</span>
         <span className="mode-badge" aria-label="Integrations in use">
           {isFixture && <span className="tag tag-fixture">FIXTURE DATA</span>}
           {mode?.payment === "mock" && <span className="tag tag-mock">MOCK PAYMENTS</span>}

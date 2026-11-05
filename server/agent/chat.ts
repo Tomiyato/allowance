@@ -1,13 +1,14 @@
 // POST /api/chat: AI SDK v7 UI message stream consumed by @ai-sdk/react useChat.
 import type { Request, Response } from "express";
 import { convertToModelMessages, isStepCount, streamText, type UIMessage } from "ai";
-import { addLedger, refreshMandateStatus, remaining, touch, type Session } from "../store.ts";
+import { addLedger, mandatePurchases, recipientStatuses, refreshMandateStatus, remaining, touch, type Session } from "../store.ts";
 import { isRateLimit, model, RATE_LIMIT_MESSAGE } from "./model.ts";
 import { agentInstructions } from "./prompt.ts";
 import { buildTools } from "./tools.ts";
 
 const MAX_HISTORY = 16;
-const MAX_STEPS = 6;
+// search_gifts + report_suspicious_content + buy_gift_plan + summary fit easily; room for a retry.
+const MAX_STEPS = 10;
 
 function lastUserText(messages: UIMessage[]): string {
   const m = [...messages].reverse().find((x) => x.role === "user");
@@ -55,13 +56,17 @@ export async function handleChat(req: Request, res: Response, session: Session, 
       session.ai_active = label;
       touch(session);
     }),
-    instructions: agentInstructions(session.mandate, remaining(session)),
+    instructions: agentInstructions(session.mandate, remaining(session), new Date(), {
+      recipients: recipientStatuses(session),
+      purchases: mandatePurchases(session),
+    }),
     messages: modelMessages,
     tools,
     stopWhen: isStepCount(MAX_STEPS),
     maxRetries: 2,
     onError: ({ error }) => {
       if (!isRateLimit(error)) console.error("[chat] stream error:", error);
+      else console.warn(`[chat] rate-limited: ${String((error as Error)?.message ?? error).replace(/\s+/g, " ").slice(0, 240)}`);
     },
   });
 

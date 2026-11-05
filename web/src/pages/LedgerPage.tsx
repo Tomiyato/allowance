@@ -8,23 +8,29 @@ import {
   type ValueFormatterParams,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { useMemo, useState } from "react";
-import type { Decision, LedgerActor, LedgerRow, Purchase } from "../../../shared/types";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import type { AppState, Decision, LedgerActor, LedgerRow, Purchase } from "../../../shared/types";
 import { Icon, type IconName } from "../components/Icon";
 import { dateTime, money, timeOnly } from "../format";
+import { giftPurchase, giftTitle, round2 } from "../giftlist";
 import { useStore } from "../store";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
+// Ribbon palette (see the tokens at the top of styles.css): ivory rows, cream header, garnet accent.
 const gridTheme = themeQuartz.withParams({
-  accentColor: "#0f766e",
+  accentColor: "#8e1b2f",
+  backgroundColor: "#fffdf8",
+  oddRowBackgroundColor: "#fdf9f1",
+  rowHoverColor: "#f7efe1",
+  selectedRowBackgroundColor: "#f5ebdd",
   fontFamily: "inherit",
   fontSize: 13,
-  foregroundColor: "#13293a",
-  headerTextColor: "#4a5b6a",
-  headerBackgroundColor: "#f5f7f9",
+  foregroundColor: "#2a211c",
+  headerTextColor: "#5a4e45",
+  headerBackgroundColor: "#f7f1e5",
   headerFontWeight: 600,
-  borderColor: "#e2e8ee",
+  borderColor: "#ece3d2",
   rowHeight: 44,
   headerHeight: 40,
   wrapperBorderRadius: 12,
@@ -56,7 +62,7 @@ function DecisionCell({ value }: ICellRendererParams<LedgerRow, Decision | null>
   return <span className={`badge badge-${value}`}>{decisionLabel[value]}</span>;
 }
 
-function TextCell({ value }: ICellRendererParams<LedgerRow, string>) {
+function TextCell({ value }: ICellRendererParams<unknown, string>) {
   return <span title={value ?? ""}>{value}</span>;
 }
 
@@ -77,6 +83,8 @@ const rowClassRules: RowClassRules<LedgerRow> = {
 
 export function LedgerPage() {
   const { state, refresh } = useStore();
+  const recipients = state?.mandate?.recipients;
+  const names = useMemo(() => new Map((recipients ?? []).map((r) => [r.id, r.name])), [recipients]);
   const [filter, setFilter] = useState("");
   const [spinning, setSpinning] = useState(false);
 
@@ -92,6 +100,13 @@ export function LedgerPage() {
         getQuickFilterText: (p) => (p.value ? dateTime(p.value) : ""),
       },
       { field: "actor", headerName: "Actor", width: 112, cellRenderer: ActorCell, getQuickFilterText: (p) => (p.value ? actorMeta[p.value as LedgerActor].label : "") },
+      {
+        field: "recipient_id",
+        headerName: "Recipient",
+        width: 130,
+        valueGetter: (p) => (p.data?.recipient_id ? (names.get(p.data.recipient_id) ?? p.data.recipient_id) : ""),
+        cellRenderer: TextCell,
+      },
       { field: "action", headerName: "Action", width: 196, cellClass: "mono-cell" },
       { field: "summary", headerName: "Summary", flex: 1, minWidth: 260, cellRenderer: TextCell },
       { field: "amount", headerName: "Amount", width: 110, type: "rightAligned", valueFormatter: moneyFmt },
@@ -106,7 +121,7 @@ export function LedgerPage() {
       { field: "paypal_id", headerName: "PayPal ID", width: 190, cellClass: "mono-cell" },
       { field: "remaining_budget", headerName: "Remaining", width: 118, type: "rightAligned", valueFormatter: moneyFmt },
     ],
-    [],
+    [names],
   );
 
   const defaultColDef = useMemo<ColDef<LedgerRow>>(() => ({ resizable: true, sortable: true, suppressMovable: false }), []);
@@ -126,15 +141,20 @@ export function LedgerPage() {
       <header className="page-head">
         <p className="eyebrow">Step 3 · Ledger</p>
         <h1>Every action, on the record</h1>
-        <p className="lede">Searches, proposals, policy decisions and PayPal calls, with the budget left after each one.</p>
+        <p className="lede">
+          Who got what, and every search, proposal, policy decision and PayPal call behind it, with the budget left after
+          each one.
+        </p>
       </header>
 
       <div className="kpis">
         <Kpi label="Spent" value={money(m?.spent ?? 0)} sub="captured by PayPal" />
         <Kpi label="Refunded" value={money(m?.refunded ?? 0)} sub="back to the buyer" />
-        <Kpi label="Remaining" value={money(state?.remaining ?? 0)} sub={m ? `of ${money(m.budget_total)}` : "no mandate"} strong />
+        <Kpi label="Remaining" value={money(state?.remaining ?? 0)} sub={m ? `of ${money(m.budget_total)}` : "no gift list"} strong />
         <Kpi label="Blocked attempts" value={String(blockedCount)} sub="stopped by policy" tone={blockedCount ? "block" : undefined} />
       </div>
+
+      {state && state.recipients.length > 0 && <GiftListGrid state={state} />}
 
       <CategorySpend purchases={purchases} />
 
@@ -166,7 +186,7 @@ export function LedgerPage() {
             rowClassRules={rowClassRules}
             loading={!state}
             tooltipShowDelay={300}
-            overlayNoRowsTemplate="<span class='muted'>No activity yet. Create a mandate and ask the agent for something.</span>"
+            overlayNoRowsTemplate="<span class='muted'>No activity yet. Create a gift list and ask the agent to shop it.</span>"
             animateRows
           />
         </div>
@@ -215,6 +235,157 @@ function CategorySpend({ purchases }: { purchases: Purchase[] }) {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+// ---------- gift list grid ----------
+
+type GiftState = "bought" | "waiting" | "to_buy" | "blocked" | "refunded" | "declined" | "total";
+
+interface GiftRow {
+  id: string;
+  recipient: string;
+  envelope: number;
+  gift: string;
+  price: number | null;
+  state: GiftState;
+  /** Shown in the status cell of the total row. */
+  note: string;
+  reasons: string;
+  capture: string | null;
+  left: number;
+}
+
+const giftState: Record<Exclude<GiftState, "total">, { label: string; cls: string }> = {
+  bought: { label: "Bought", cls: "badge-charged" },
+  waiting: { label: "Waiting for your OK", cls: "badge-pending_approval" },
+  to_buy: { label: "To buy", cls: "badge-to_buy" },
+  blocked: { label: "Blocked", cls: "badge-blocked" },
+  refunded: { label: "Refunded", cls: "badge-refunded" },
+  declined: { label: "Declined", cls: "badge-rejected" },
+};
+
+function GiftStateCell({ data }: ICellRendererParams<GiftRow>) {
+  if (!data) return null;
+  if (data.state === "total") return <span className="muted">{data.note}</span>;
+  const s = giftState[data.state];
+  return (
+    <span className={`badge badge-plain ${s.cls}`} title={data.reasons || undefined}>
+      {s.label}
+    </span>
+  );
+}
+
+function giftRows(state: AppState): GiftRow[] {
+  return state.recipients.map((st) => {
+    const p = giftPurchase(st, state.purchases);
+    let s: GiftState = st.state === "bought" ? "bought" : st.state === "waiting_approval" ? "waiting" : "to_buy";
+    if (s === "to_buy" && p?.status === "blocked") s = "blocked";
+    if (s === "to_buy" && p?.status === "refunded") s = "refunded";
+    if (s === "to_buy" && p?.status === "rejected") s = "declined";
+    const shown = p && p.status !== "failed" ? p : null;
+    return {
+      id: st.recipient.id,
+      recipient: st.recipient.name,
+      envelope: st.recipient.envelope,
+      gift: shown ? giftTitle(shown) : "",
+      price: shown ? shown.total : null,
+      state: s,
+      note: "",
+      reasons: s === "blocked" || s === "waiting" ? (p?.reasons.join(" ") ?? "") : "",
+      capture: p?.status === "charged" || p?.status === "refunded" ? p.paypal.capture_id : null,
+      left: st.remaining,
+    };
+  });
+}
+
+const giftMoney = (p: ValueFormatterParams<GiftRow, number | null>) => (p.value == null ? "" : money(p.value));
+
+const NARROW = "(max-width: 760px)";
+function useNarrow(): boolean {
+  return useSyncExternalStore(
+    (fn) => {
+      const mq = window.matchMedia(NARROW);
+      mq.addEventListener("change", fn);
+      return () => mq.removeEventListener("change", fn);
+    },
+    () => window.matchMedia(NARROW).matches,
+  );
+}
+
+/** One row per person on the gift list, with a pinned total row (AG Grid Community). */
+function GiftListGrid({ state }: { state: AppState }) {
+  const narrow = useNarrow();
+  const rows = useMemo(() => giftRows(state), [state]);
+  const total = useMemo<GiftRow[]>(() => {
+    const bought = rows.filter((r) => r.state === "bought").length;
+    const waiting = rows.filter((r) => r.state === "waiting").length;
+    const spent = round2(state.recipients.reduce((s, r) => s + r.spent, 0));
+    return [
+      {
+        id: "total",
+        recipient: "Total",
+        envelope: round2(rows.reduce((s, r) => s + r.envelope, 0)),
+        gift: `${bought} of ${rows.length} bought`,
+        price: spent,
+        state: "total",
+        note: waiting ? `${waiting} waiting` : "",
+        reasons: "",
+        capture: null,
+        left: round2(rows.reduce((s, r) => s + r.left, 0)),
+      },
+    ];
+  }, [rows, state.recipients]);
+
+  const columns = useMemo<ColDef<GiftRow>[]>(
+    () => [
+      { field: "recipient", headerName: "Recipient", width: narrow ? 112 : 150, pinned: "left", cellClass: "strong-cell", cellRenderer: TextCell },
+      { field: "envelope", headerName: "Envelope", width: narrow ? 92 : 108, type: "rightAligned", valueFormatter: giftMoney },
+      { field: "gift", headerName: "Gift", flex: 1, minWidth: narrow ? 200 : 230, cellRenderer: TextCell },
+      {
+        field: "price",
+        headerName: "Price",
+        width: 100,
+        type: "rightAligned",
+        valueFormatter: giftMoney,
+        headerTooltip: "The total row shows what PayPal has captured",
+        cellClassRules: { "strike-cell": (p) => p.data?.state === "blocked" || p.data?.state === "declined" || p.data?.state === "refunded" },
+      },
+      { field: "state", headerName: "Status", width: 168, cellRenderer: GiftStateCell, tooltipValueGetter: (p) => p.data?.reasons || "" },
+      { field: "capture", headerName: "PayPal capture", width: 184, cellClass: "mono-cell" },
+      { field: "left", headerName: "Left", width: 96, type: "rightAligned", valueFormatter: giftMoney, cellClass: "strong-cell" },
+    ],
+    [narrow],
+  );
+
+  const rowClassRules = useMemo<RowClassRules<GiftRow>>(
+    () => ({
+      "row-total": (p) => !!p.node.rowPinned,
+      "row-wait": (p) => !p.node.rowPinned && p.data?.state === "waiting",
+      "row-deny": (p) => !p.node.rowPinned && p.data?.state === "blocked",
+    }),
+    [],
+  );
+
+  return (
+    <section className="panel grid-panel gift-grid" aria-label="Gift list">
+      <div className="gift-grid-head">
+        <h2 className="panel-title">Gift list</h2>
+        <span className="muted small">One envelope per person; Left is the envelope minus what PayPal captured.</span>
+      </div>
+      <AgGridReact<GiftRow>
+        theme={gridTheme}
+        rowData={rows}
+        pinnedBottomRowData={total}
+        columnDefs={columns}
+        defaultColDef={{ resizable: true, sortable: true }}
+        getRowId={(p) => p.data.id}
+        rowClassRules={rowClassRules}
+        domLayout="autoHeight"
+        tooltipShowDelay={300}
+        suppressCellFocus
+      />
     </section>
   );
 }

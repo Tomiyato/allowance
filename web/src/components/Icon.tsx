@@ -26,6 +26,11 @@ const paths: Record<string, string> = {
   home: "M4 11l8-7 8 7 M6 9.5V20h12V9.5",
   pan: "M3 11h12v1a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5v-1z M15 12h6",
   bolt: "M13 3L5 14h6l-1 7 8-11h-6l1-7z",
+  plus: "M12 5v14 M5 12h14",
+  book: "M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15z M5 19.5A1.5 1.5 0 0 0 6.5 21H19",
+  ball: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M12 7.5l3.8 2.8-1.5 4.5H9.7l-1.5-4.5L12 7.5z M12 3v4.5 M15.8 10.3l4.6-1.6 M14.3 14.8l2.8 3.9 M9.7 14.8l-2.8 3.9 M8.2 10.3L3.6 8.7",
+  star: "M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6L12 16.7l-5.4 2.9 1.1-6L3.2 9.4l6.1-.8L12 3z",
+  pen: "M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20z M14 7l3 3",
 };
 
 export type IconName = keyof typeof paths;
@@ -57,19 +62,60 @@ const categoryIcon: Record<string, IconName> = {
   home: "home",
   kitchen: "pan",
   electronics: "bolt",
+  books: "book",
+  sports: "ball",
+  toys: "star",
+  office: "pen",
 };
 
 export function iconForCategory(cat: string): IconName {
   return categoryIcon[cat] ?? "box";
 }
 
-export function BrandMark({ size = 28 }: { size?: number }) {
+// Ribbon bow on a 40x28 grid: two looped bows (with the loop opening cut out), two tails and a knot.
+const BOW_LOOPS = [
+  "M20 11.5C15.5 3.5 4.5.5 3.4 7.2 2.6 12.6 11.5 15 20 11.5ZM17.2 10.6C13.6 6.6 8 5.2 7.3 8.1 6.8 10.5 11.8 11.7 17.2 10.6Z",
+  "M20 11.5C24.5 3.5 35.5.5 36.6 7.2 37.4 12.6 28.5 15 20 11.5ZM22.8 10.6C26.4 6.6 32 5.2 32.7 8.1 33.2 10.5 28.2 11.7 22.8 10.6Z",
+];
+const BOW_TAILS = [
+  "M18.6 12.4C16.8 16.6 14.2 21.4 11.4 26.2L14.9 25 16.4 27.8C18.3 22.6 19.6 17.6 20.4 12.8Z",
+  "M21.4 12.4C23.2 16.6 25.8 21.4 28.6 26.2L25.1 25 23.6 27.8C21.7 22.6 20.4 17.6 19.6 12.8Z",
+];
+
+function BowShape({ fill, knot }: { fill: string; knot: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden>
-      <rect width="32" height="32" rx="8" fill="#0e3b43" />
-      <path d="M8 21a8 8 0 0 1 16 0" fill="none" stroke="#7dd3c0" strokeWidth="3" strokeLinecap="round" />
-      <path d="M8 21a8 8 0 0 1 4.3-7.1" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-      <circle cx="16" cy="21" r="2" fill="#fff" />
+    <>
+      <g fill={fill}>
+        {BOW_LOOPS.map((d) => (
+          <path key={d} fillRule="evenodd" d={d} />
+        ))}
+        {BOW_TAILS.map((d) => (
+          <path key={d} d={d} />
+        ))}
+      </g>
+      <rect x="17.4" y="8.6" width="5.2" height="5.8" rx="2" fill={knot} />
+    </>
+  );
+}
+
+/** The small bow tied on the R of the wordmark. Sized by CSS in em. */
+export function Bow({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 40 28" aria-hidden focusable="false">
+      <BowShape fill="var(--brand, #8e1b2f)" knot="var(--brand-deep, #6e1424)" />
+    </svg>
+  );
+}
+
+/** App mark: an ivory bow with a gold knot on a garnet tile. Same drawing as /favicon.svg. */
+export function BrandMark({ size = 30 }: { size?: number }) {
+  return (
+    <svg className="brand-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden focusable="false">
+      <rect width="32" height="32" rx="8" fill="#8e1b2f" />
+      <rect x="1" y="1" width="30" height="30" rx="7" fill="none" stroke="#c9a24b" strokeOpacity=".55" />
+      <g transform="translate(2.4 6.6) scale(.68)">
+        <BowShape fill="#fbf3e4" knot="#d9b25a" />
+      </g>
     </svg>
   );
 }

@@ -2,9 +2,9 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import type { AppState, LedgerRow, Mandate, Product, Purchase } from "../shared/types.ts";
+import type { AppState, LedgerRow, Mandate, Product, Purchase, RecipientStatus } from "../shared/types.ts";
 import { aiLabel, config } from "./config.ts";
-import { remainingBudget } from "./policy.ts";
+import { remainingBudget, round2 } from "./policy.ts";
 
 export interface Session {
   id: string;
@@ -37,11 +37,24 @@ function load() {
   if (!storePath) return;
   try {
     const data = JSON.parse(readFileSync(storePath, "utf8")) as Session[];
-    for (const s of data) sessions.set(s.id, { ...s, products: s.products ?? {}, last_source: s.last_source ?? null, ai_active: s.ai_active ?? null });
+    for (const s of data) sessions.set(s.id, upgrade(s));
     console.log(`[store] loaded ${sessions.size} session(s) from ${storePath}`);
   } catch (e: any) {
     if (e?.code !== "ENOENT") console.warn(`[store] could not load ${storePath}: ${e?.message}`);
   }
+}
+
+/** Defaults for sessions persisted before a field existed (gift-list fields: recipients, recipient_id). */
+function upgrade(s: Session): Session {
+  return {
+    ...s,
+    mandate: s.mandate ? { ...s.mandate, recipients: s.mandate.recipients ?? [] } : null,
+    purchases: (s.purchases ?? []).map((p) => ({ ...p, recipient_id: p.recipient_id ?? null })),
+    ledger: (s.ledger ?? []).map((r) => ({ ...r, recipient_id: r.recipient_id ?? null })),
+    products: s.products ?? {},
+    last_source: s.last_source ?? null,
+    ai_active: s.ai_active ?? null,
+  };
 }
 
 function scheduleSave() {
@@ -109,27 +122,59 @@ export function refreshMandateStatus(s: Session, now = new Date()) {
   if (!m) return;
   if ((m.status === "active" || m.status === "exhausted") && now.getTime() > Date.parse(m.expires_at)) {
     m.status = "expired";
-    addLedger(s, { actor: "policy", action: "mandate.expired", summary: `Mandate "${m.title}" expired` });
+    addLedger(s, { actor: "policy", action: "mandate.expired", summary: `Gift list "${m.title}" expired` });
     return;
   }
   if (m.status === "active" && remainingBudget(m) <= 0.004) {
     m.status = "exhausted";
-    addLedger(s, { actor: "policy", action: "mandate.exhausted", summary: "Budget fully spent; mandate exhausted" });
+    addLedger(s, { actor: "policy", action: "mandate.exhausted", summary: "Budget fully spent; the gift list is used up" });
   } else if (m.status === "exhausted" && remainingBudget(m) > 0.004) {
     m.status = "active";
     addLedger(s, { actor: "policy", action: "mandate.reactivated", summary: "Budget available again after a refund" });
   }
 }
 
+/** Purchases of the session's current mandate, in creation order. */
+export function mandatePurchases(s: Session): Purchase[] {
+  const mid = s.mandate?.id;
+  return mid ? s.purchases.filter((p) => p.mandate_id === mid) : [];
+}
+
+/**
+ * Gift list status per person, derived from purchases (GIFTLIST_SPEC decision 6): spent = charged
+ * totals for that person, so a refund frees the envelope. [] without a mandate or recipients.
+ */
+export function recipientStatuses(s: Session): RecipientStatus[] {
+  const m = s.mandate;
+  if (!m || !m.recipients?.length) return [];
+  const purchases = mandatePurchases(s);
+  return m.recipients.map((r) => {
+    const mine = purchases.filter((p) => p.recipient_id === r.id);
+    const spent = round2(mine.filter((p) => p.status === "charged").reduce((sum, p) => sum + p.total, 0));
+    const state = mine.some((p) => p.status === "charged")
+      ? "bought"
+      : mine.some((p) => p.status === "pending_approval")
+        ? "waiting_approval"
+        : "to_buy";
+    return {
+      recipient: r,
+      spent,
+      remaining: round2(r.envelope - spent),
+      state,
+      purchase_ids: mine.map((p) => p.id).reverse(),
+    };
+  });
+}
+
 export function appState(s: Session): AppState {
   refreshMandateStatus(s);
-  const mid = s.mandate?.id;
   return {
     mandate: s.mandate,
     remaining: remaining(s),
-    purchases: mid ? s.purchases.filter((p) => p.mandate_id === mid) : [],
+    purchases: mandatePurchases(s),
     ledger: s.ledger,
     mode: { payment: config.paymentMode, products: s.last_source ?? config.productSource, ai: aiLabel(), ai_active: s.ai_active },
+    recipients: recipientStatuses(s),
   };
 }
 
@@ -150,6 +195,13 @@ export function addLedger(s: Session, row: LedgerInput): LedgerRow {
     paypal_id: row.paypal_id ?? null,
     purchase_id: row.purchase_id ?? null,
     remaining_budget: row.remaining_budget !== undefined ? row.remaining_budget : s.mandate ? remaining(s) : null,
+    // Rows about a purchase inherit its recipient unless the caller says otherwise.
+    recipient_id:
+      row.recipient_id !== undefined
+        ? row.recipient_id
+        : row.purchase_id
+          ? (s.purchases.find((p) => p.id === row.purchase_id)?.recipient_id ?? null)
+          : null,
   };
   s.ledger.push(full);
   scheduleSave();

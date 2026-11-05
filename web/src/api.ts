@@ -1,5 +1,6 @@
 import type { AppState, LedgerRow, Mandate, ProposePurchaseOutput, Purchase } from "../../shared/types";
 import { fixtureDraft, fixtureState } from "./fixtures";
+import { envelopeTotal, recipientStatuses, round2 } from "./giftlist";
 
 export const isFixture = new URLSearchParams(window.location.search).get("fixture") === "1";
 
@@ -72,7 +73,7 @@ const fakeId = (len = 17) =>
 
 function remaining(): number {
   const m = fx.mandate;
-  return m ? Math.round((m.budget_total - m.spent + m.refunded) * 100) / 100 : 0;
+  return m ? round2(m.budget_total - m.spent + m.refunded) : 0;
 }
 
 function log(r: Omit<LedgerRow, "id" | "ts" | "remaining_budget"> & { remaining_budget?: number | null }) {
@@ -80,7 +81,13 @@ function log(r: Omit<LedgerRow, "id" | "ts" | "remaining_budget"> & { remaining_
   fx.ledger.unshift({ id: `led_${++seq}`, ts: new Date().toISOString(), remaining_budget: fx.remaining, ...r });
 }
 
-const blank = { amount: null, decision: null, reasons: null, paypal_id: null, purchase_id: null };
+const blank = { amount: null, decision: null, reasons: null, paypal_id: null, purchase_id: null, recipient_id: null };
+
+/** " for Mom" when the purchase names someone on the list. */
+function forName(recipientId: string | null): string {
+  const r = fx.mandate?.recipients.find((x) => x.id === recipientId);
+  return r ? ` for ${r.name}` : "";
+}
 
 function findPurchase(id: string): Purchase {
   const p = fx.purchases.find((x) => x.id === id);
@@ -88,11 +95,17 @@ function findPurchase(id: string): Purchase {
   return p;
 }
 
+/** Fixture-only: the current state without the API delay (used by the fixture chat transport). */
+export function fixtureSnapshot(): AppState {
+  fx.remaining = remaining();
+  fx.recipients = recipientStatuses(fx.mandate, fx.purchases);
+  return structuredClone(fx);
+}
+
 const fixtureApi: Api = {
   async state() {
     await delay(120);
-    fx.remaining = remaining();
-    return structuredClone(fx);
+    return fixtureSnapshot();
   },
   async parseMandate(text) {
     await delay(900);
@@ -100,15 +113,24 @@ const fixtureApi: Api = {
   },
   async saveMandate(mandate) {
     await delay(300);
+    if (mandate.recipients.length > 0 && Math.abs(envelopeTotal(mandate.recipients) - mandate.budget_total) > 0.01) {
+      throw new ApiError("The envelopes must add up to the total.", 400);
+    }
     const saved: Mandate = { ...mandate, id: mandate.id || `mdt_fx_${++seq}`, status: "draft", spent: 0, refunded: 0 };
     fx.mandate = saved;
     fx.purchases = [];
-    log({ ...blank, actor: "user", action: "mandate.created", summary: `Mandate saved: ${saved.title}` });
+    const people = saved.recipients.length;
+    log({
+      ...blank,
+      actor: "user",
+      action: "mandate.created",
+      summary: `Gift list saved: ${saved.title}, ${people} ${people === 1 ? "person" : "people"}, $${saved.budget_total.toFixed(2)} total`,
+    });
     return { mandate: structuredClone(saved) };
   },
   async approveMandate(id) {
     await delay(500);
-    if (!fx.mandate || fx.mandate.id !== id) throw new ApiError("Mandate not found", 404);
+    if (!fx.mandate || fx.mandate.id !== id) throw new ApiError("Gift list not found", 404);
     fx.mandate.status = "active";
     fx.mandate.paypal.authorization_id = fakeId();
     log({
@@ -124,9 +146,9 @@ const fixtureApi: Api = {
   },
   async revokeMandate(id) {
     await delay(500);
-    if (!fx.mandate || fx.mandate.id !== id) throw new ApiError("Mandate not found", 404);
+    if (!fx.mandate || fx.mandate.id !== id) throw new ApiError("Gift list not found", 404);
     fx.mandate.status = "revoked";
-    log({ ...blank, actor: "user", action: "mandate.revoked", summary: "Mandate revoked by the user" });
+    log({ ...blank, actor: "user", action: "mandate.revoked", summary: "Gift list revoked by you; the agent has no spending power" });
     log({ ...blank, actor: "paypal", action: "paypal.void", summary: "Authorization voided at PayPal", paypal_id: fx.mandate.paypal.authorization_id });
     return { mandate: structuredClone(fx.mandate) };
   },
@@ -136,16 +158,26 @@ const fixtureApi: Api = {
     if (p.status !== "pending_approval") throw new ApiError("Purchase is not waiting for approval", 409);
     p.status = "charged";
     p.paypal.capture_id = fakeId();
-    if (fx.mandate) fx.mandate.spent += p.total;
-    log({ ...blank, actor: "user", action: "purchase.approved", summary: `You approved ${p.items[0]?.title ?? "the purchase"}`, purchase_id: p.id, decision: "allow" });
-    log({ ...blank, actor: "paypal", action: "paypal.capture", summary: `Captured ${p.total.toFixed(2)} USD`, amount: p.total, paypal_id: p.paypal.capture_id, purchase_id: p.id });
+    if (fx.mandate) fx.mandate.spent = round2(fx.mandate.spent + p.total);
+    const who = forName(p.recipient_id);
+    const rid = p.recipient_id;
+    log({ ...blank, actor: "user", action: "purchase.approved", summary: `You approved ${p.items[0]?.title ?? "the purchase"}${who}`, purchase_id: p.id, decision: "allow", recipient_id: rid });
+    log({ ...blank, actor: "paypal", action: "paypal.capture", summary: `PayPal captured $${p.total.toFixed(2)}${who}`, amount: p.total, paypal_id: p.paypal.capture_id, purchase_id: p.id, recipient_id: rid });
     return { purchase: structuredClone(p) };
   },
   async rejectPurchase(id) {
     await delay(400);
     const p = findPurchase(id);
     p.status = "rejected";
-    log({ ...blank, actor: "user", action: "purchase.rejected", summary: `You declined ${p.items[0]?.title ?? "the purchase"}`, purchase_id: p.id, decision: "deny" });
+    log({
+      ...blank,
+      actor: "user",
+      action: "purchase.rejected",
+      summary: `You declined ${p.items[0]?.title ?? "the purchase"}${forName(p.recipient_id)}; nothing was charged`,
+      purchase_id: p.id,
+      decision: "deny",
+      recipient_id: p.recipient_id,
+    });
     return { purchase: structuredClone(p) };
   },
   async refundPurchase(id) {
@@ -154,8 +186,17 @@ const fixtureApi: Api = {
     if (p.status !== "charged") throw new ApiError("Only charged purchases can be refunded", 409);
     p.status = "refunded";
     p.paypal.refund_id = fakeId();
-    if (fx.mandate) fx.mandate.refunded += p.total;
-    log({ ...blank, actor: "paypal", action: "paypal.refund", summary: `Refunded ${p.total.toFixed(2)} USD`, amount: p.total, paypal_id: p.paypal.refund_id, purchase_id: p.id });
+    if (fx.mandate) fx.mandate.refunded = round2(fx.mandate.refunded + p.total);
+    log({
+      ...blank,
+      actor: "paypal",
+      action: "paypal.refund",
+      summary: `PayPal refunded $${p.total.toFixed(2)}${forName(p.recipient_id)}`,
+      amount: p.total,
+      paypal_id: p.paypal.refund_id,
+      purchase_id: p.id,
+      recipient_id: p.recipient_id,
+    });
     return { purchase: structuredClone(p) };
   },
   async simulateHijack() {
@@ -164,10 +205,16 @@ const fixtureApi: Api = {
     const qty = 5;
     const price = 34;
     const total = qty * price;
+    // The hijacked agent targets the first person on the list (spec decision 7).
+    const target = m?.recipients[0] ?? null;
+    const left = target ? (recipientStatuses(m, fx.purchases).find((r) => r.recipient.id === target.id)?.remaining ?? 0) : 0;
     const reasons: string[] = [];
     if (m && qty > m.max_quantity_per_item) reasons.push(`Quantity ${qty} of "Deluxe Herb Seed Gift Box" exceeds the per-item cap of ${m.max_quantity_per_item}.`);
     if (total > remaining()) reasons.push(`Total $${total.toFixed(2)} exceeds the remaining budget of $${remaining().toFixed(2)}.`);
-    if (!m || m.status !== "active") reasons.unshift("No active mandate: the agent has no spending power.");
+    if (target && total > left) {
+      reasons.push(`$${total.toFixed(2)} for ${target.name} exceeds ${target.name}'s envelope: $${left.toFixed(2)} left of $${target.envelope.toFixed(2)}.`);
+    }
+    if (!m || m.status !== "active") reasons.unshift("No active gift list: the agent has no spending power.");
     const p: Purchase = {
       id: `pur_fx_${++seq}`,
       mandate_id: m?.id ?? "none",
@@ -191,11 +238,13 @@ const fixtureApi: Api = {
       paypal: { order_id: null, capture_id: null, refund_id: null, approve_url: null },
       error: null,
       created_at: new Date().toISOString(),
+      recipient_id: target?.id ?? null,
     };
     fx.purchases.push(p);
     const sim = "[Red-team simulation] ";
-    log({ ...blank, actor: "agent", action: "agent.hijacked_attempt", summary: `${sim}Hijacked agent proposed 5 x Deluxe Herb Seed Gift Box for $170.00`, amount: total, purchase_id: p.id });
-    log({ ...blank, actor: "policy", action: "policy.deny", summary: `${sim}Blocked: ${reasons.join(" ")}`, amount: total, decision: "deny", reasons, purchase_id: p.id });
+    const rid = p.recipient_id;
+    log({ ...blank, actor: "agent", action: "agent.hijacked_attempt", summary: `${sim}Hijacked agent proposed 5 x Deluxe Herb Seed Gift Box for $170.00${forName(rid)}`, amount: total, purchase_id: p.id, recipient_id: rid });
+    log({ ...blank, actor: "policy", action: "policy.deny", summary: `${sim}Blocked: ${reasons.join(" ")}`, amount: total, decision: "deny", reasons, purchase_id: p.id, recipient_id: rid });
     return { purchase: structuredClone(p), remaining: remaining() };
   },
 };

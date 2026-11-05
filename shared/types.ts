@@ -18,6 +18,25 @@ export interface Mandate {
   spent: number;
   refunded: number;
   created_at: string;
+  /** Gift list: one envelope per person. Empty = legacy single-budget mandate. Envelopes sum to budget_total. */
+  recipients: Recipient[];
+}
+
+export interface Recipient {
+  id: string; // "rcp_…"
+  name: string; // "Mom"
+  envelope: number; // dollars
+  interests: string; // "loves gardening"
+}
+
+export type RecipientState = "to_buy" | "waiting_approval" | "bought";
+
+export interface RecipientStatus {
+  recipient: Recipient;
+  spent: number; // charged purchases for this recipient
+  remaining: number; // envelope - spent
+  state: RecipientState; // bought if any charged purchase; waiting_approval if any pending; else to_buy
+  purchase_ids: string[]; // all purchases for this recipient, newest first
 }
 
 export interface Product {
@@ -77,6 +96,8 @@ export interface Purchase {
   };
   error: string | null;
   created_at: string;
+  /** Gift list: who this purchase is for; null on legacy mandates. */
+  recipient_id: string | null;
 }
 
 export type LedgerActor = "user" | "agent" | "policy" | "paypal";
@@ -93,6 +114,7 @@ export interface LedgerRow {
   paypal_id: string | null;
   purchase_id: string | null;
   remaining_budget: number | null;
+  recipient_id: string | null;
 }
 
 export interface AppState {
@@ -107,16 +129,28 @@ export interface AppState {
     /** The provider:model that answered the most recent chat turn in this session; null before the first turn. */
     ai_active: string | null;
   };
+  /** Gift list status per person; [] when there is no mandate or it has no recipients. */
+  recipients: RecipientStatus[];
 }
 
 // Agent tool outputs. Chat UI renders tool parts by tool name.
 export interface SearchProductsOutput { query: string; source: "channel3" | "catalog"; products: Product[] }
-export interface GetMandateOutput { mandate: Mandate | null; remaining: number }
+export interface GetMandateOutput { mandate: Mandate | null; remaining: number; recipients: RecipientStatus[] }
 export interface ProposePurchaseOutput { purchase: Purchase; remaining: number } // card by purchase.status: charged→receipt, pending_approval→approval, blocked→blocked, failed→error
 export interface RequestRefundOutput { purchase: Purchase; remaining: number }
 export interface ListPurchasesOutput { purchases: Purchase[] }
 /** report_suspicious_content: the model flagged product text that tries to instruct it (defence layer 1). */
 export interface ReportSuspiciousOutput { flagged: true; product_id: string; product_title: string | null; reason: string }
+
+export interface SearchGiftsOutput {
+  source: "channel3" | "catalog";
+  results: { recipient_id: string; recipient_name: string; query: string; products: Product[] }[];
+}
+export interface BuyGiftPlanOutput {
+  results: { recipient_id: string; recipient_name: string; purchase: Purchase | null; error: string | null }[];
+  remaining: number;
+  recipients: RecipientStatus[];
+}
 
 export type AgentToolName =
   | "search_products"
@@ -124,4 +158,6 @@ export type AgentToolName =
   | "propose_purchase"
   | "request_refund"
   | "list_purchases"
-  | "report_suspicious_content";
+  | "report_suspicious_content"
+  | "search_gifts"
+  | "buy_gift_plan";

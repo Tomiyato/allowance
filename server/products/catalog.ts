@@ -56,6 +56,13 @@ export function searchCatalog(p: SearchParams, includeInjection: boolean): Produ
       return { e, score };
     })
     .filter((x) => x.score > 1)
-    .sort((a, b) => b.score - a.score || a.e.price - b.e.price);
-  return scored.slice(0, p.limit ?? 6).map((x) => toProduct(x.e));
+    // Ties: with a price cap (a gift envelope) the best gift is the one closest under it; without, cheapest first.
+    .sort((a, b) => b.score - a.score || (p.max_price !== undefined ? b.e.price - a.e.price : a.e.price - b.e.price));
+  const out = scored.slice(0, p.limit ?? 6).map((x) => toProduct(x.e));
+  // Demo beat, same as the Channel3 path: the poisoned listing shows up second for garden/gift/mom searches.
+  if (includeInjection && injectionMatches(p.query, p.category)) {
+    const inj = injectionProduct();
+    if (!out.some((x) => x.id === inj.id) && (p.max_price === undefined || inj.price <= p.max_price)) out.splice(1, 0, inj);
+  }
+  return out;
 }
