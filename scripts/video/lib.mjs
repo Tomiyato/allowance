@@ -18,7 +18,7 @@ export const DIRS = {
   stills: join(OUT, "frames"),
 };
 
-export const BASE_URL = (process.env.BASE_URL ?? "http://localhost:3160").replace(/\/+$/, "");
+export const BASE_URL = (process.env.BASE_URL ?? "https://allowance-cpp0.onrender.com").replace(/\/+$/, "");
 
 /**
  * Stage layout (1920×1080 output). The app is recorded in a 1536×900 viewport with CSS zoom 1.2,

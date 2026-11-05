@@ -153,17 +153,27 @@ async function recordTake({ only, take, carry }) {
 
   /** Eased scroll so [first .. last] sits in the band (if too tall, `last` wins; `align` top keeps first). */
   async function frameSpan(first, last, { pad = 18, ms = 1000, align = "fit" } = {}) {
-    const b = await band();
-    const f = await center(first);
-    const l = await center(last ?? first);
-    const room = b.bottom - b.top - 2 * pad;
-    let dy;
-    if (align === "top" || l.bottom - f.top <= room) dy = f.top - b.top - pad;
-    else dy = l.bottom - (b.bottom - pad);
-    if (align === "center" && l.bottom - f.top <= room) dy = (f.top + l.bottom) / 2 - (b.top + b.bottom) / 2;
-    if (Math.abs(dy) < 4) return;
-    await page.evaluate((dy, ms) => window.__rec.scrollByPx(dy, ms), dy, rec.on ? ms : 1);
-    await pause(150);
+    const offset = async () => {
+      const b = await band();
+      const f = await center(first);
+      const l = await center(last ?? first);
+      const room = b.bottom - b.top - 2 * pad;
+      let dy;
+      if (align === "top" || l.bottom - f.top <= room) dy = f.top - b.top - pad;
+      else dy = l.bottom - (b.bottom - pad);
+      if (align === "center" && l.bottom - f.top <= room) dy = (f.top + l.bottom) / 2 - (b.top + b.bottom) / 2;
+      return dy;
+    };
+    // A second, short pass corrects a scroll the app moved under us (the chat's own smooth
+    // scroll to its end can still be running when a scene starts).
+    for (let pass = 0; pass < 3; pass++) {
+      const dy = await offset();
+      if (Math.abs(dy) < (pass ? 24 : 4)) return;
+      if (pass) log(`  frameSpan: correcting ${Math.round(dy)} px`);
+      const moved = await page.evaluate((dy, ms) => window.__rec.scrollByPx(dy, ms), dy, rec.on ? (pass ? 450 : ms) : 1);
+      if (Math.abs(moved) < 2) return; // already at the top or bottom of the page
+      await pause(150);
+    }
   }
 
   async function waitFor(fn, timeout) {
@@ -200,6 +210,9 @@ async function recordTake({ only, take, carry }) {
     let outcome = "timeout";
     const started = Date.now();
     await rec.fast(async () => {
+      // A card can settle only after the turn ends: the refund card reads "Refund not completed"
+      // until the app state refreshes. So an idle composer gets a grace period before giving up.
+      let idleSince = null;
       while (Date.now() - started < TURN_TIMEOUT) {
         await sleep(500);
         const busy = await isBusy();
@@ -211,7 +224,8 @@ async function recordTake({ only, take, carry }) {
           outcome = "error: " + (await page.$eval(".chat-error span", (n) => n.textContent).catch(() => "?"));
           break;
         }
-        if (!busy && Date.now() - started > 4000) {
+        idleSince = busy ? null : (idleSince ?? Date.now());
+        if (idleSince && Date.now() - started > 4000 && Date.now() - idleSince > 6000) {
           outcome = "ended without the expected card";
           break;
         }
@@ -541,7 +555,9 @@ async function recordTake({ only, take, carry }) {
 
     // s06: the flag card (if any), then the hijacked-agent simulation.
     await scene("s06", async ({ cues }) => {
-      await waitToastGone();
+      // No wait for the "Approved and paid" toast: it sits in a corner, and the narration opens on
+      // the flag card.
+      await page.waitForNetworkIdle({ idleTime: 300, timeout: 3000 }).catch(() => {});
       const flag = (await page.$$(".flag-card")).at(-1);
       let clickCue = cues[2];
       if (flag && state.flagged) {
@@ -594,7 +610,7 @@ async function recordTake({ only, take, carry }) {
         await chatTurn("return", () => clickChip(P.returnChip), ".msg-agent:not(.msg-sim) .tool-card.refund");
         carry.returnTyped = false;
       }
-      const card = (await page.$(".msg-agent:not(.msg-sim) .tool-card.refund")).at(-1);
+      const card = (await page.$$(".msg-agent:not(.msg-sim) .tool-card.refund")).at(-1);
       await frameSpan(card, card, { ms: 900 });
       await pointAt(card, { side: "right" });
       await pause(1200);
@@ -621,10 +637,16 @@ async function recordTake({ only, take, carry }) {
       await page.evaluate((ms) => window.__rec.scrollByPx(-1e5, ms), rec.on ? 700 : 1);
       await moveTo(await el(".page-head .pill"), { dx: 20, dy: 8, ms: 600 });
       await pause(700);
-      await nav("Agent");
-      await page.waitForSelector(".no-mandate");
-      await sleep(500); // the chat scrolls itself to the end on mount
-      await page.evaluate((ms) => window.__rec.scrollByPx(-1e5, ms), rec.on ? 600 : 1);
+      // The chat scrolls itself to its end on mount; cut that, so the page opens at its top on
+      // the "The mandate is revoked." banner.
+      await click(await el(".nav a", { text: "Agent" }));
+      await rec.cut(async () => {
+        await page.waitForFunction(() => document.querySelector(".nav a.active")?.textContent?.trim() === "Agent");
+        await page.waitForSelector(".no-mandate");
+        await sleep(1400);
+        await page.evaluate(() => (document.scrollingElement.scrollTop = 0));
+        await sleep(250);
+      });
       await moveTo(await el(".no-mandate strong"), { dx: 60, dy: 6, ms: 600 });
       await hold(1200);
     });
@@ -637,7 +659,7 @@ async function recordTake({ only, take, carry }) {
         await page.waitForSelector(".ag-row", { timeout: 30_000 });
         await sleep(800);
       });
-      const kpis = await page.$(".kpi");
+      const kpis = await page.$$(".kpi");
       for (const k of kpis) {
         await moveTo(k, { dy: 8, ms: 480 });
         await pause(120);

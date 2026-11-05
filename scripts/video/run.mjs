@@ -17,7 +17,7 @@
 // TTS_PROVIDER=gemini switches back to Gemini TTS (scenes.json tts.gemini).
 // Scene 3 logs in to the PayPal sandbox as PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD (.env, read by
 // Node). Each take runs in a fresh browser session; a failed chat turn restarts the take (MAX_TAKES).
-// Environment: BASE_URL (default http://localhost:3160), CHROME_PATH, HEADFUL=1, VO_TEMPO (≤ 1.05),
+// Environment: BASE_URL (default https://allowance-cpp0.onrender.com, the hosted demo), CHROME_PATH, HEADFUL=1, VO_TEMPO (≤ 1.05),
 // AI_COOLDOWN (s between AI calls, default 25), MAX_TAKES (default 3), KEEP_FRAMES=1,
 // ELEVENLABS_VOICE_ID / ELEVENLABS_MODEL_ID / ELEVENLABS_SEED.
 // Outputs: video-out/allowance-demo.mp4, video-out/allowance-demo.srt, video-out/frames/*.png,

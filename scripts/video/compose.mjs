@@ -7,7 +7,7 @@
 // lead + narration + tail, so narrations cannot be cut or overlap. Loudness: two-pass loudnorm
 // to -16 LUFS. Output: H.264 yuv420p 30 fps + AAC 48 kHz.
 import { spawnSync } from "node:child_process";
-import { existsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cardPng } from "./cards.mjs";
 import {
@@ -254,12 +254,22 @@ export async function compose() {
   const cues = segs.flatMap((seg) => srtCues(voiceText(seg.scene, seg.variant), seg.start + seg.lead, seg.narr.dur));
   writeFileSync(join(OUT, "allowance-demo.srt"), cues.map((c, i) => `${i + 1}\n${srtTime(c.a)} --> ${srtTime(c.b)}\n${c.text}\n`).join("\n"));
 
-  // 5. Review stills, one per major scene, near the end of each segment (the result on screen).
-  for (const [k, id] of cfg.stills.entries()) {
+  // 5. Review stills, one per scene, near the end of each segment (the result on screen); "s03@paypal"
+  // is the last moment of PayPal's own approval page in scene 3.
+  rmSync(DIRS.stills, { recursive: true, force: true });
+  mkdirSync(DIRS.stills, { recursive: true });
+  for (const [k, entry] of cfg.stills.entries()) {
+    const [id, where] = entry.split("@");
     const seg = segs.find((x) => x.scene.id === id);
     if (!seg) continue;
-    const at = seg.start + seg.len - T.xfade - 0.7;
-    ffmpeg(["-ss", fmt(at), "-i", mp4, "-frames:v", "1", join(DIRS.stills, `${String(k + 1).padStart(2, "0")}-${id}.png`)]);
+    let at = seg.start + seg.len - T.xfade - 0.7;
+    if (where === "paypal") {
+      const mark = seg.clip?.marks?.paypal?.at(-1);
+      if (!mark) continue;
+      at = seg.start + (seg.scene.prefixCard ? T.titleCard - T.titleXfade : 0) + mark[1] - 0.6;
+    }
+    const name = `${String(k + 1).padStart(2, "0")}-${id}${where ? `-${where}` : ""}.png`;
+    ffmpeg(["-ss", fmt(at), "-i", mp4, "-frames:v", "1", join(DIRS.stills, name)]);
   }
 
   // 6. Timing report: narration windows never overlap and are never cut.
