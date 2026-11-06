@@ -1,5 +1,5 @@
 // Devpost gallery screenshots: drives a running Ribbon instance through the demo list in one fresh
-// session and saves docs/gallery/01-gift-list.png … 06-envelopes.png, 3000×2000 (3:2, each ≤ 5 MB):
+// session and saves docs/gallery/01-gift-list.png … 08-tracking-webhooks.png, 3000×2000 (3:2, each ≤ 5 MB):
 //
 //   01-gift-list.png        the demo list and the AI-drafted envelopes in the people editor
 //   02-paypal-approval.png  PayPal's own sandbox approval page for the $200.00 authorization
@@ -8,6 +8,11 @@
 //   04-hijack-blocked.png   "Simulate a hijacked agent": the red-team card, blocked by the gift list
 //   05-ledger.png           Ledger: the AG Grid gift-list grid on top of the ledger grid
 //   06-envelopes.png        the active gift list with a meter per person's envelope
+//   07-paypal-toolkit.png   Agent page, "What did PayPal record for Mom?": the "Checked with PayPal"
+//                           card from the read-only PayPal Agent Toolkit lookup (get_order)
+//   08-tracking-webhooks.png Ledger: the gift-list grid's Tracking column (RIB… numbers) over the
+//                           ledger filtered to "paypal": capture, paypal.tracking and verified
+//                           paypal.webhook rows ("PayPal confirmed: … (webhook …)")
 //
 // Each shot is the browser viewport (1500×956 CSS px at 2×) under a slim browser bar that shows the
 // page's real URL, so 02 reads www.sandbox.paypal.com. 00-cover.png is rendered separately.
@@ -17,6 +22,10 @@
 // Usage (local):
 //   npm run build && PORT=3150 PRODUCT_SOURCE=channel3 DEMO_INJECTION=1 PAYMENT_MODE=authorization npm start
 //   node scripts/screenshots.mjs     # in a second terminal
+// Only 07 and 08 (01–06 are not rewritten; the red-team step is skipped):
+//   BASE_URL=https://allowance-cpp0.onrender.com node scripts/screenshots.mjs --paypal
+// Reshoot 08 in the session the last --paypal run saved (no AI, no new PayPal approval):
+//   BASE_URL=https://allowance-cpp0.onrender.com node scripts/screenshots.mjs --paypal-ledger
 //
 // "Approve $200.00 with PayPal" logs in to the PayPal sandbox as PAYPAL_BUYER_EMAIL /
 // PAYPAL_BUYER_PASSWORD (read from .env by Node, see scripts/video/paypal.mjs). Each app shot fails
@@ -28,11 +37,13 @@
 //   CHROME_PATH  Chrome/Chromium/Edge executable (default: first installed one found below)
 //   OUT_DIR      output folder (default docs/gallery)
 //
-// AI calls: Draft with AI (1), Shop my whole gift list (1 turn, several model steps), and only if Mom
-// got no gift, "Find Mom something around $55" (1). The red-team button and the Ledger need no AI.
+// AI calls: Draft with AI (1), Shop my whole gift list (1 turn, several model steps), only if Mom
+// got no gift "Find Mom something around $55" (1, full run only), and "What did PayPal record for
+// Mom?" (1). The red-team button, approving Mom and the Ledger need no AI. A toolkit turn that fails
+// (e.g. a rate limit) waits 60 s and presses the chat's "Try again", at most twice.
 // The cover (00-cover.png) is rendered from docs/gallery/cover.html: node scripts/screenshots.mjs --cover
 
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -51,6 +62,15 @@ const TURN_TIMEOUT = 150_000;
 
 const SHOP = "Shop my whole gift list";
 const MOM_FOLLOW_UP = "Find Mom something around $55";
+const TOOLKIT = "What did PayPal record for Mom?";
+const TOOLKIT_CARD = '.msg-agent .tool-card[aria-label^="Checked with PayPal"]';
+const TOOLKIT_ERROR = ".msg-agent .tool-error";
+const LEDGER = ".grid-panel:not(.gift-grid)"; // the ledger grid (the gift-list grid is .gift-grid)
+
+/** --paypal: only 07 and 08. --paypal-ledger: only 08, in the session the last --paypal run saved. */
+const PAYPAL_ONLY = process.argv.includes("--paypal");
+const LEDGER_AGAIN = process.argv.includes("--paypal-ledger");
+const SESSION_FILE = join(tmpdir(), "ribbon-screenshots-session.json");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(`[${new Date().toISOString().slice(11, 19)}]`, ...a);
@@ -95,6 +115,8 @@ mkdirSync(OUT, { recursive: true });
 try {
   if (process.argv.includes("--cover")) {
     await shootCover();
+  } else if (LEDGER_AGAIN) {
+    await reshootLedger();
   } else {
     await runDemo();
   }
@@ -135,16 +157,18 @@ async function runDemo() {
   const envelopes = await page.$$eval(".review .rcp-row", (rows) => rows.map((r) => `${r.querySelector(".rcp-name input").value} $${r.querySelector(".rcp-env input").value}`));
   log(`Draft: ${envelopes.join(", ")}`);
   report.envelopes = envelopes;
-  // Focus Mom's envelope so the editor reads as editable.
-  await page.click(".review .rcp-row .rcp-env input");
-  await frameFirstFit(
-    [
-      ["label[for=rule]", ".review .rcp"],
-      [".review", ".review .rcp"],
-    ],
-    14,
-  );
-  await shoot("01-gift-list.png");
+  if (!PAYPAL_ONLY) {
+    // Focus Mom's envelope so the editor reads as editable.
+    await page.click(".review .rcp-row .rcp-env input");
+    await frameFirstFit(
+      [
+        ["label[for=rule]", ".review .rcp"],
+        [".review", ".review .rcp"],
+      ],
+      14,
+    );
+    await shoot("01-gift-list.png");
+  }
 
   // 02. Approve $200.00 with PayPal: sandbox login, then PayPal's own approval page.
   log("Approve with PayPal");
@@ -156,14 +180,14 @@ async function runDemo() {
   await approveOnPayPal(page, {
     log,
     onStep: async (kind) => {
-      if (kind !== "submit" || shot) return;
+      if (kind !== "submit" || shot || PAYPAL_ONLY) return;
       shot = true;
       await sleep(1500);
       await framePayPalAmount();
       await shoot("02-paypal-approval.png", { appChecks: false });
     },
   });
-  if (!shot) throw new Error("PayPal showed no approval page; 02 not shot.");
+  if (!shot && !PAYPAL_ONLY) throw new Error("PayPal showed no approval page; 02 not shot.");
   await waitUntil(async () => !onPayPal(page) && page.url().startsWith(BASE), 60_000);
   await page.waitForNetworkIdle({ idleTime: 500, timeout: 20_000 }).catch(() => {});
   if (!page.url().includes("/agent")) await page.goto(`${BASE}/agent`, { waitUntil: "networkidle0" });
@@ -173,13 +197,22 @@ async function runDemo() {
 
   // 03. Shop the whole list in one pass; Mom's gift (> $45) waits for an OK.
   await page.waitForSelector(".composer input");
-  await chatTurn("shop", () => clickButton(SHOP, "button.chip-suggest"), ".msg-agent .gift-plan");
+  await chatTurn("shop", () => clickButton(SHOP, "button.chip-suggest"), ".msg-agent .gift-plan", { retries: 2 });
   let mom = await momRow();
   log(`Mom: ${mom.kind} ${mom.price ?? ""} ${mom.gift ?? ""}`);
   if (mom.kind === "gp-bought") {
     const st = await apiState();
     report.searchRows = st.ledger.filter((r) => /search/.test(r.action)).map((r) => `${r.action}: ${r.summary}`);
     log(`Search rows:\n  ${report.searchRows.join("\n  ")}`);
+  }
+  if (PAYPAL_ONLY) {
+    // 07 and 08 only need captures: Mom bought outright (≤ $45) is fine; a missing gift is reported.
+    if (mom.kind !== "gp-bought" && mom.kind !== "gp-waiting") report.notes = [...(report.notes ?? []), `Mom has no gift (${mom.kind})`];
+    await approveMom();
+    await saveSession();
+    await shootToolkit();
+    await shootTrackingLedger();
+    return;
   }
   if (mom.kind === "gp-bought") throw new Error(`The agent bought Mom's gift without asking (${mom.price} ≤ $45). Run again for a new session.`);
   if (mom.kind !== "gp-waiting") {
@@ -234,13 +267,7 @@ async function runDemo() {
   await shoot("06-envelopes.png");
 
   // Approve Mom's gift from her envelope row, so the ledger shows the whole list bought.
-  const approve = await page.evaluateHandle(() => [...document.querySelectorAll(".env-decide button")].find((b) => /^\s*Approve/.test(b.textContent)) ?? null);
-  if (approve.asElement()) {
-    log("Approve Mom's gift");
-    await approve.asElement().click();
-    await waitUntil(async () => (await apiState()).recipients.every((r) => r.state !== "waiting_approval"), 30_000);
-    await settle(1000);
-  }
+  await approveMom();
 
   // 05. Ledger: the gift-list grid on top, the ledger grid below.
   log("Ledger");
@@ -252,14 +279,239 @@ async function runDemo() {
   await shoot("05-ledger.png");
   const st = await apiState();
   report.captures = st.purchases.filter((p) => p.paypal?.capture_id).map((p) => ({ for: p.recipient_id, total: p.total, capture: p.paypal.capture_id, status: p.status }));
+
+  await saveSession();
+  await shootToolkit();
+  await shootTrackingLedger();
 }
 
-/** Waits for the turn's card; one turn per prompt (a resend would duplicate the user bubble). */
-async function chatTurn(label, send, doneSel) {
+/** Approves Mom's gift from her envelope row on the Gift list page (no AI), so every gift is captured. */
+async function approveMom() {
+  if (!page.url().includes("/mandate")) {
+    await clickLink("Gift list");
+    await page.waitForSelector(".env-rows");
+    await settle(1200);
+  }
+  const approve = await page.evaluateHandle(() => [...document.querySelectorAll(".env-decide button")].find((b) => /^\s*Approve/.test(b.textContent)) ?? null);
+  if (approve.asElement()) {
+    log("Approve Mom's gift");
+    await approve.asElement().click();
+    await waitUntil(async () => (await apiState()).recipients.every((r) => r.state !== "waiting_approval"), 30_000);
+    await settle(1000);
+  }
+}
+
+// 07. "What did PayPal record for Mom?": the read-only PayPal Agent Toolkit lookup and its card.
+async function shootToolkit() {
+  await clickLink("Agent");
+  await page.waitForSelector(".composer input");
+  await waitUntil(() => hasText("button.chip-suggest", TOOLKIT), 15_000);
+  await chatTurn("toolkit", () => clickButton(TOOLKIT, "button.chip-suggest"), `${TOOLKIT_CARD}, ${TOOLKIT_ERROR}`, { retries: 2 });
+  if (!(await page.$(TOOLKIT_CARD))) throw new Error(`toolkit: no "Checked with PayPal" card (${await page.$eval(TOOLKIT_ERROR, (n) => n.textContent).catch(() => "?")})`);
+  report.toolkit = await page.$$eval(TOOLKIT_CARD, (cards) =>
+    cards.map((c) => ({
+      lookup: c.getAttribute("aria-label"),
+      rows: [...c.querySelectorAll(".plist li")].map((li) => li.innerText.replace(/\s+/g, " ").trim()),
+    })),
+  );
+  log(`Toolkit cards:\n  ${report.toolkit.map((c) => `${c.lookup}\n    ${c.rows.join("\n    ")}`).join("\n  ")}`);
+  await settle(800);
+  // The question, then every toolkit card of the answer; if that is too tall, the cards alone.
+  const firstCard = await page.evaluateHandle((sel) => {
+    const cards = [...document.querySelectorAll(sel)];
+    const lastMsg = cards.at(-1)?.closest(".msg-agent");
+    return cards.find((c) => c.closest(".msg-agent") === lastMsg);
+  }, TOOLKIT_CARD);
+  const lastCard = (await page.$$(TOOLKIT_CARD)).at(-1);
+  const question = await page.evaluateHandle(
+    (q) => [...document.querySelectorAll(".msg-user")].filter((m) => m.textContent.includes(q)).at(-1) ?? null,
+    TOOLKIT,
+  );
+  const b = await band();
+  const room = b.bottom - b.top - 2 * 14;
+  const spanOf = (a, z) => page.evaluate((a, z) => z.getBoundingClientRect().bottom - a.getBoundingClientRect().top, a, z);
+  if (question.asElement() && (await spanOf(question, lastCard)) <= room) await scrollToSpan(question, lastCard, 14);
+  else await scrollToSpan(firstCard, lastCard, 14, { alignTop: true });
+  await shoot("07-paypal-toolkit.png");
+}
+
+// 08. Ledger: the Tracking column in the gift-list grid, and the PayPal rows (capture, tracking, webhook).
+async function shootTrackingLedger() {
+  log("Ledger (tracking and webhooks)");
+  await clickLink("Ledger");
+  await page.waitForSelector(".gift-grid .ag-row", { timeout: 30_000 });
+  await page.waitForSelector(".grid-panel:not(.gift-grid) .ag-row", { timeout: 30_000 });
+  // Webhooks arrive a few seconds after the capture: press Refresh until one is on the ledger.
+  const hooked = await waitUntil(async () => {
+    await clickButton("Refresh", ".grid-toolbar button");
+    await settle(2500);
+    return (await apiState()).ledger.some((r) => r.action === "paypal.webhook");
+  }, 90_000);
+  const st = await apiState();
+  report.webhooks = st.ledger.filter((r) => r.action === "paypal.webhook").map((r) => r.summary);
+  report.tracking = st.ledger.filter((r) => r.action === "paypal.tracking").map((r) => r.summary);
+  log(`Webhook rows: ${report.webhooks.length}, tracking rows: ${report.tracking.length}`);
+  if (!hooked) throw new Error("No paypal.webhook row on the ledger after 90 s of Refresh.");
+  if (!report.tracking.length) throw new Error("No paypal.tracking row on the ledger.");
+  await waitUntil(async () => (await page.$$eval(".gift-grid .ag-row .ag-cell[col-id=tracking]", (c) => c.filter((n) => /^RIB/.test(n.textContent.trim())).length)) > 0, 15_000);
+  // Filter the ledger to one person whose newest rows are PayPal's webhook and tracking (Mom first, the
+  // person 07 asks about), else to "paypal"; then show the newest summaries in full.
+  const names = new Map((st.mandate?.recipients ?? []).map((r) => [r.id, r.name]));
+  const byLatestHook = [...new Set(st.ledger.filter((r) => r.action === "paypal.webhook" && r.recipient_id).sort((a, b) => (a.ts < b.ts ? 1 : -1)).map((r) => names.get(r.recipient_id)))];
+  const terms = [...new Set(["Mom", ...byLatestHook, "paypal"].filter(Boolean))];
+  let term = null;
+  for (const t of terms) {
+    await setLedgerFilter(t);
+    const actions = await topLedgerActions(4);
+    if (actions.includes("paypal.webhook") && actions.includes("paypal.tracking")) {
+      term = t;
+      break;
+    }
+  }
+  if (!term) await setLedgerFilter((term = "paypal"));
+  report.ledgerFilter = term;
+  log(`Ledger filter "${term}": ${(await topLedgerActions(4)).join(", ")}`);
+  await fitLedgerSummaries(4);
+  await page.mouse.move(5, 5);
+  await settle(1000);
+  // The gift-list grid from its title, then as many ledger rows as fit below it.
+  await frameFirstFit([[".gift-grid", ".grid-panel:not(.gift-grid) .grid-wrap"]], 14, { alignTop: true });
+  await shoot("08-tracking-webhooks.png");
+}
+
+
+async function setLedgerFilter(text) {
+  const box = `${LEDGER} .grid-toolbar input[type=search]`;
+  // Clear the controlled input the way React sees it, then type like a user.
+  await page.$eval(box, (el) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, "");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.type(box, text);
+  await page.$eval(box, (el) => el.blur());
+  await settle(1200);
+}
+
+/** Actions of the first n rendered ledger rows, in display order. */
+function topLedgerActions(n) {
+  return page.$$eval(
+    `${LEDGER} .ag-row[row-index]`,
+    (rows, n) =>
+      rows
+        .sort((a, b) => Number(a.getAttribute("row-index")) - Number(b.getAttribute("row-index")))
+        .slice(0, n)
+        .map((r) => r.querySelector('[col-id="action"]')?.textContent.trim() ?? ""),
+    n,
+  );
+}
+
+/**
+ * Widens Summary (dragging its header edge, as a user would) so the first n rows read in full, then
+ * scrolls the grid sideways to the first column boundary that brings Summary's right edge into view.
+ */
+async function fitLedgerSummaries(n) {
+  const m = await page.evaluate(
+    (sel, n) => {
+      const rows = [...document.querySelectorAll(`${sel} .ag-row[row-index]`)]
+        .sort((a, b) => Number(a.getAttribute("row-index")) - Number(b.getAttribute("row-index")))
+        .slice(0, n);
+      const need = Math.max(
+        ...rows.map((r) => {
+          const cell = r.querySelector('[col-id="summary"]');
+          const span = cell?.querySelector("span");
+          if (!cell || !span) return 0;
+          const cs = getComputedStyle(cell);
+          return span.getBoundingClientRect().width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 6;
+        }),
+      );
+      const head = document.querySelector(`${sel} .ag-header-cell[col-id="summary"]`);
+      return { need: Math.ceil(need), width: head?.getBoundingClientRect().width ?? 0 };
+    },
+    LEDGER,
+    n,
+  );
+  log(`Ledger Summary: needs ${m.need}px, is ${Math.round(m.width)}px`);
+  if (m.need > m.width) await dragSummaryEdge(m.need - m.width);
+  // Scroll sideways only as far as needed, to a column boundary so the first visible column is whole.
+  const columns = (sel) =>
+    page.evaluate((sel) => {
+      const root = document.querySelector(`${sel} .ag-root`).getBoundingClientRect();
+      const heads = [...document.querySelectorAll(`${sel} .ag-header-row-column .ag-header-cell[col-id]`)].map((h) => ({ id: h.getAttribute("col-id"), r: h.getBoundingClientRect() }));
+      const first = heads.reduce((a, h) => (h.r.left < a.r.left ? h : a));
+      return { scrolled: root.left - first.r.left, right: root.right - first.r.left, cols: heads.map((h) => ({ id: h.id, left: h.r.left - first.r.left, right: h.r.right - first.r.left })) };
+    }, sel);
+  const c = await columns(LEDGER);
+  const summary = c.cols.find((x) => x.id === "summary");
+  const over = summary.right - c.right;
+  if (over > 0) {
+    const shift = c.cols.map((x) => x.left).sort((a, b) => a - b).find((l) => l >= c.scrolled + over) ?? over;
+    const body = await page.$(`${LEDGER} .ag-row[row-index]`);
+    const b = await body.boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.wheel({ deltaX: shift - c.scrolled });
+    await settle(900);
+    const after = await columns(LEDGER);
+    log(`Ledger scrolled sideways ${Math.round(after.scrolled)}px (wanted ${Math.round(shift)}), first column shown: ${after.cols.find((x) => x.left >= after.scrolled - 1)?.id}`);
+    // Let Summary run to the grid's right edge, so no sliver of the next column shows.
+    const gap = after.right - after.cols.find((x) => x.id === "summary").right;
+    if (gap > 0) await dragSummaryEdge(gap);
+  }
+}
+
+async function dragSummaryEdge(dx) {
+  const edge = await page.$(`${LEDGER} .ag-header-cell[col-id="summary"] .ag-header-cell-resize`);
+  if (!edge) throw new Error("No resize edge on the ledger's Summary header.");
+  await edge.evaluate((e) => e.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" })); // the mouse needs it on screen
+  await settle(300);
+  const box = await edge.boundingBox();
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) await page.mouse.move(x + (dx * i) / 10, y);
+  await page.mouse.up();
+  await settle(800);
+}
+
+/** Saves the session cookie so --paypal-ledger can reshoot 08 without AI turns or a new PayPal approval. */
+async function saveSession() {
+  writeFileSync(SESSION_FILE, JSON.stringify({ base: BASE, cookies: await page.cookies(BASE) }));
+}
+
+async function reshootLedger() {
+  const saved = JSON.parse(readFileSync(SESSION_FILE, "utf8"));
+  if (saved.base !== BASE) throw new Error(`The saved session is for ${saved.base}, not ${BASE}.`);
+  await page.setCookie(...saved.cookies);
+  await page.goto(`${BASE}/mandate`, { waitUntil: "networkidle0" });
+  const st = await apiState();
+  if (!st.purchases?.some((p) => p.paypal?.capture_id)) throw new Error("The saved session has no captures (the server restarted?). Run --paypal again.");
+  await shootTrackingLedger();
+}
+
+/**
+ * Waits for the turn's card; one turn per prompt (a resend would duplicate the user bubble). With
+ * `retries`, a failed turn waits 60 s and presses the chat's "Try again" (regenerate, no new bubble).
+ */
+async function chatTurn(label, send, doneSel, { retries = 0 } = {}) {
   const before = await count(doneSel);
   log(`${label}: sending`);
   await send();
-  const started = Date.now();
+  let started = Date.now();
+  let outcome;
+  for (let attempt = 0; ; attempt++) {
+    outcome = await waitTurn(doneSel, before, started);
+    if (outcome === "ok" || attempt >= retries || !(await page.$(".chat-error"))) break;
+    log(`${label}: ${outcome}; waiting 60 s, then Try again (retry ${attempt + 1} of ${retries})`);
+    await sleep(60_000);
+    await clickButton("Try again", ".chat-error button");
+    started = Date.now();
+  }
+  await aiTurn(label);
+  if (outcome !== "ok") throw new Error(`${label}: ${outcome}`);
+  log(`${label}: done in ${Math.round((Date.now() - started) / 1000)} s`);
+}
+
+async function waitTurn(doneSel, before, started) {
   let outcome = "timeout";
   let idleSince = null;
   while (Date.now() - started < TURN_TIMEOUT) {
@@ -279,9 +531,7 @@ async function chatTurn(label, send, doneSel) {
       break;
     }
   }
-  await aiTurn(label);
-  if (outcome !== "ok") throw new Error(`${label}: ${outcome}`);
-  log(`${label}: done in ${Math.round((Date.now() - started) / 1000)} s`);
+  return outcome;
 }
 
 /** Records which model answered the last AI call (the server's mode.ai_active). */
