@@ -93,8 +93,9 @@ All calls use the PayPal REST API with OAuth2 client credentials. The access tok
 | Fallback rail: buyer approves each purchase | `POST /v2/checkout/orders` with `intent: CAPTURE`, then `POST /v2/checkout/orders/{id}/capture` | `per_purchase` rail, `server/paypal/per-purchase.ts` | Implemented, unit-tested with a mocked PayPal. Not used in the demo. |
 | Buyer return and cancel URLs | `GET /paypal/return`, `GET /paypal/cancel` (our endpoints) | `paypalReturnRouter()` in `server/routes.ts` | |
 | Keyless development | No network calls. IDs start with `MOCK-`, and the UI shows a **MOCK PAYMENTS** badge. | `mock` rail, `server/paypal/mock.ts` | Works |
-| Webhooks | `POST /api/paypal/webhook` (our endpoint) | `server/routes.ts`. Events are logged, not yet turned into ledger rows. | Stretch |
-| PayPal Agent Toolkit | `@paypal/agent-toolkit` is installed, not wired into the agent | Planned: read-only tools only. Money-moving toolkit tools will never be given to the model. | Planned |
+| Ship a gift | `POST /v2/checkout/orders/{id}/track` with the capture ID, carrier `OTHER` ("Ribbon demo shipping") and a simulated `RIB…` tracking number; fallback `POST /v1/shipping/trackers-batch` | `server/paypal/tracking.ts`, `shipPurchase()` in `server/service.ts` | Verified in sandbox and on the hosted app: every captured gift gets a tracker, GET order shows it `SHIPPED`. A tracking failure never fails the purchase. |
+| Webhooks | `POST /api/paypal/webhook` (our endpoint). Every event is checked with `POST /v1/notifications/verify-webhook-signature`; the app finds or creates its own webhook (`GET`/`POST /v1/notifications/webhooks`) for `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.REFUNDED`, `PAYMENT.AUTHORIZATION.VOIDED` | `server/paypal/webhooks.ts`, `recordPayPalWebhook()` in `server/service.ts` | Verified on the hosted app: real signed deliveries become `paypal.webhook` ledger rows ("PayPal confirmed: capture … COMPLETED for Mom"). Unsigned events get 400. Rows are a confirmation trail and change no balances. |
+| PayPal Agent Toolkit | `@paypal/agent-toolkit` 1.11: `get_order`, `get_refund`, `get_shipment_tracking` | `server/agent/paypal-toolkit.ts` | Verified in sandbox. Read-only: three layers keep money-moving tools away from the model (toolkit config, a code allowlist with a test that registers all 47 toolkit tools and fails on any extra, and a scope check that allows only this list's own PayPal IDs). The toolkit's tools are re-declared for AI SDK v7 with the toolkit's own descriptions, schemas and `execute`. |
 | Vault (save the wallet, charge later) | `/v3/vault/setup-tokens`, `/v3/vault/payment-tokens` | Not implemented. `PAYMENT_MODE=vault` falls back to `authorization`. | Planned |
 
 **Merchant of record.** The app's own sandbox business account is the seller. Product prices come from Channel3, and fulfilment is simulated (see [Limitations](#limitations)).
@@ -230,18 +231,18 @@ A PayPal sandbox personal account for the "Approve with PayPal" step. These are 
 
 ## Tech stack
 
-TypeScript everywhere. **Server:** Node 22, Express 5, tsx, zod 4. **AI:** Vercel AI SDK 7, `@ai-sdk/google` (Gemini), `@ai-sdk/openai-compatible` (Groq). **Payments:** PayPal REST (Orders v2, Payments v2), `@paypal/agent-toolkit` (planned). **Products:** Channel3 Search API plus a seeded catalog. **Web:** React 19, Vite 8, `@ai-sdk/react` `useChat`, AG Grid Community 36. **Hosting:** Render (free web service, `render.yaml` Blueprint). **Tests:** Vitest.
+TypeScript everywhere. **Server:** Node 22, Express 5, tsx, zod 4. **AI:** Vercel AI SDK 7, `@ai-sdk/google` (Gemini), `@ai-sdk/openai-compatible` (Groq). **Payments:** PayPal REST (Orders v2, Payments v2), `@paypal/agent-toolkit` (read-only lookups). **Products:** Channel3 Search API plus a seeded catalog. **Web:** React 19, Vite 8, `@ai-sdk/react` `useChat`, AG Grid Community 36. **Hosting:** Render (free web service, `render.yaml` Blueprint). **Tests:** Vitest.
 
 ## Limitations
 
 - **Merchant of record.** The app's own PayPal sandbox business account is the seller. Real products and prices come from Channel3, but the money goes to that account, not to the store that lists the product.
-- **Simulated fulfilment.** Nothing ships. A "purchase" is a PayPal capture plus a ledger row. Shipment tracking is not implemented.
+- **Simulated fulfilment.** No real parcel ships. Each purchase is a PayPal capture plus a shipment registered with PayPal under a simulated `RIB…` tracking number (carrier "Ribbon demo shipping").
 - **In-memory store.** State lives per anonymous session cookie, in memory, with a best-effort JSON file. Render's free tier has no persistent disk, so data resets on restart, redeploy or spin-down. There are no user accounts.
 - **PayPal does not enforce the exact budget.** In the sandbox, PayPal accepted an over-capture on the capture that used up the authorization ($40 + $30 + $100 against $150), then refused any further capture. So PayPal is the outer bound, and the exact per-person budget is enforced by the policy engine under a per-session lock.
 - **Refunds do not refill the PayPal hold.** A refund frees the person's envelope in Ribbon, but PayPal counts every capture against the authorization, refunded or not. Ribbon therefore also checks the hold's uncaptured room and blocks a re-purchase the hold could no longer cover ("The PayPal hold has $X left to capture").
 - **29-day window.** A PayPal authorization is honoured for 29 days, so a gift list expires no later than that.
 - **USD only**, one currency per list. One gift list per session at a time.
-- **The Agent Toolkit, the vault rail and webhook-to-ledger** are planned, not built. The `per_purchase` fallback rail is implemented but not used in the demo.
+- **The vault rail** is planned, not built. The `per_purchase` fallback rail is implemented but not used in the demo. The Agent Toolkit's Transaction Search tool is left out: it needs "Transaction search" enabled on the PayPal app.
 - **The free AI tiers are small.** Under load, a chat turn may move down the model chain or show the rate-limit message.
 
 ## License
