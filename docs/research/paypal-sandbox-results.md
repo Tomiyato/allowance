@@ -94,3 +94,43 @@ Method: each case is its own Orders v2 `AUTHORIZE` order ($50–120), approved h
 ### What Ribbon can truthfully say revoke does
 
 Revoke takes spending power away in code at once: the gift list is marked revoked, pending approvals are rejected, and the policy engine refuses every later purchase, whatever PayPal answers. Ribbon then voids the PayPal authorization. If anything on it was never captured, which covers any list not spent to the last cent, PayPal voids it and releases the hold on the rest of the budget at once. This is verified in the sandbox after one or several partial captures and after refunds. PayPal refuses the void only when the captures already used up the whole authorization. Then no hold is left to release, and the ledger says "Nothing left on the PayPal authorization to void". Refunds are separate: they return money that was captured and never reopen a used-up authorization. Do not claim that revoke refunds purchases already made.
+
+## Shipment tracking and webhooks, 2026-11-06
+
+### Tracking on a capture from an AUTHORIZE order (direct REST spike)
+
+Order created as in the app (`intent: AUTHORIZE`, `shipping_preference: NO_SHIPPING`), approved headless as the US sandbox buyer.
+
+| Step | Call | HTTP | Result |
+|---|---|---|---|
+| Order / authorization | `POST /v2/checkout/orders`, `.../authorize` $60 | 200 / 201 | order `0JK73366XC201873M`, authorization `5A8492897H628980B` |
+| Capture $20 | `POST /v2/payments/authorizations/{id}/capture`, `final_capture:false` | 201 | capture `43R3365866516402T` |
+| Orders track | `POST /v2/checkout/orders/0JK73366XC201873M/track` `{capture_id, tracking_number, carrier:"OTHER", carrier_name_other:"Ribbon demo shipping", notify_payer:false, items}` | 201 | `purchase_units[0].shipping.trackers[0]` id `43R3365866516402T-RIBMW4FNE3B`, status `SHIPPED` |
+| Confirm | `GET /v2/checkout/orders/0JK73366XC201873M` | 200 | same tracker stored |
+| Capture $10 | same | 201 | capture `6GS81428XV3442055` |
+| Fallback API | `POST /v1/shipping/trackers-batch` `{transaction_id: capture, status:"SHIPPED", carrier:"OTHER", carrier_name_other}` | 200 | `tracker_identifiers[0]`, `errors: []` |
+| Confirm | `GET /v1/shipping/trackers/6GS81428XV3442055-RIBMW4FNI01` | 200 | `SHIPPED`, carrier `OTHER`, `Ribbon demo shipping` |
+| Void | `POST /v2/payments/authorizations/{id}/void` | 200 | `VOIDED` (tracking does not block a void) |
+
+Result: the Orders v2 track endpoint works for captures made from an authorization, also with `NO_SHIPPING`. Ribbon uses it first; trackers-batch is the fallback.
+
+### Full app run through the service functions (authorization rail, no AI)
+
+`createMandate` → `startApproval` → buyer approval → `finalizeApproval` → `buyGiftPlan` (5 gifts) → `approvePurchase` (Mom, over $45) → `refundPurchase` (Leo) → `revokeMandate`. Order `4VE83781XK863924V`, authorization `5TT52682LH7951402`.
+
+| Gift | Capture | Tracking | PayPal tracker (GET order shows it, `SHIPPED`) |
+|---|---|---|---|
+| Dad $39 | `0SS991469M009330P` | `RIBA836DS0E7X` | `0SS991469M009330P-RIBA836DS0E7X` |
+| Leo $21 (then refunded `6L443673TJ8256247`) | `5LS16689PW3676257` | `RIBAE2NNVX4C1` | `5LS16689PW3676257-RIBAE2NNVX4C1` |
+| Sam $27.50 | `1UE12326HC2340203` | `RIBNZ3VACAWXM` | `1UE12326HC2340203-RIBNZ3VACAWXM` |
+| Office Secret Santa $18 | `85V83588J30909530` | `RIBEUUAFMR451` | `85V83588J30909530-RIBEUUAFMR451` |
+| Mom $52 (after approval) | `85938259R22452828` | `RIB5T57DXH14U` | `85938259R22452828-RIB5T57DXH14U` |
+
+Each capture got a `paypal.tracking` ledger row right after `paypal.capture`. Revoke then voided the authorization (`GET` → `VOIDED`).
+
+### Webhooks (sandbox REST, before deploy)
+
+- `GET /v1/notifications/webhooks`: the app had no webhooks.
+- The app's own find-or-create code against a throwaway URL (`https://ribbon-webhook-probe.example.com/api/paypal/webhook`): created webhook `1TJ893374R225184G` with the four event types. A second run with an empty cache found the same id. The webhook was then deleted.
+- `POST /v1/notifications/verify-webhook-signature` with forged transmission headers: 200 `{"verification_status":"FAILURE"}` → Ribbon answers 400.
+- Not verified yet: a real delivery to the hosted app. PayPal delivers only to a public https URL. Webhooks simulator events cannot be verified through verify-webhook-signature (PayPal "Webhooks simulator" docs), so Ribbon rejects them with 400 by design.

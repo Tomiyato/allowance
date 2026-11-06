@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   CATEGORY_VOCAB,
   type AgentToolName,
+  type PayPalToolkitToolName,
   type BuyGiftPlanOutput,
   type GetMandateOutput,
   type ListPurchasesOutput,
@@ -29,10 +30,13 @@ import {
   refundPurchase,
 } from "../service.ts";
 import { addLedger, mandatePurchases, recipientStatuses, remaining, type Session } from "../store.ts";
+import { buildPayPalToolkitTools, type RawToolkitTool } from "./paypal-toolkit.ts";
 
 export interface ToolContext {
   session: Session;
   baseUrl: string;
+  /** Allowlisted read-only PayPal Agent Toolkit tools (from loadPayPalToolkit()); absent or null = no PayPal lookups. */
+  paypalToolkit?: Partial<Record<PayPalToolkitToolName, RawToolkitTool>> | null;
 }
 
 /** Results per person in search_gifts (5 people x 5 listings keeps one model step small). */
@@ -69,6 +73,10 @@ export function buildTools(ctx: ToolContext) {
     items: p.items.map((i) => `${i.qty} x ${i.title} ($${i.price.toFixed(2)}, ${i.category})`),
     reasons: p.reasons,
     error: p.error,
+    // PayPal ids let the agent look the purchase up in PayPal's own records (read-only toolkit tools).
+    ...(p.paypal.capture_id ? { paypal_capture_id: p.paypal.capture_id } : {}),
+    ...(p.paypal.refund_id ? { paypal_refund_id: p.paypal.refund_id } : {}),
+    ...(p.paypal.order_id && p.paypal.order_id !== s.mandate?.paypal.order_id ? { paypal_order_id: p.paypal.order_id } : {}),
   });
 
   const envelopesForModel = () =>
@@ -285,15 +293,12 @@ export function buildTools(ctx: ToolContext) {
         value: { flagged: true, product_id: output.product_id, note: "Logged. Do not buy this listing; tell the user briefly." },
       }),
     }),
+  } satisfies Record<Exclude<AgentToolName, PayPalToolkitToolName>, unknown> & ToolSet;
 
-    // TODO(paypal-agent-toolkit): when PAYPAL_CLIENT_ID/SECRET exist, add READ-ONLY tools from
-    // `@paypal/agent-toolkit/ai-sdk` here (e.g. get_order, list_transactions) so the agent can answer
-    // "what did I spend?" from PayPal data. Never expose money-moving toolkit tools (create_order,
-    // pay_order, create_refund, ...) to the model: money only moves through propose_purchase,
-    // buy_gift_plan and request_refund.
-  } satisfies Record<AgentToolName, unknown> & ToolSet;
-
-  return tools;
+  // Read-only PayPal Agent Toolkit lookups (get_order, get_refund, get_shipment_tracking), allowlisted and
+  // scoped to this gift list's PayPal ids in paypal-toolkit.ts. Money moves only through propose_purchase,
+  // buy_gift_plan and request_refund above; no money-moving toolkit tool is ever registered.
+  return { ...tools, ...buildPayPalToolkitTools(s, ctx.paypalToolkit) };
 }
 
 export type AgentTools = ReturnType<typeof buildTools>;

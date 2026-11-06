@@ -11,6 +11,7 @@ import {
   type Recipient,
 } from "../shared/types.ts";
 import { rail, PaymentError } from "./paypal/index.ts";
+import { DEMO_CARRIER, DEMO_CARRIER_NAME, demoTrackingNumber } from "./paypal/tracking.ts";
 import { evaluatePolicy, purchaseTotal, round2, type PolicyItem, type PolicyRecipient } from "./policy.ts";
 import { injectionProduct, lookupCatalog } from "./products/index.ts";
 import {
@@ -20,6 +21,7 @@ import {
   recipientStatuses,
   refreshMandateStatus,
   remaining,
+  allSessions,
   touch,
   withSessionLock,
   type Session,
@@ -402,6 +404,61 @@ async function chargeNow(s: Session, p: Purchase, baseUrl: string, label = "") {
       purchase_id: p.id,
     });
   }
+  if (p.status === "charged") await shipPurchase(s, p, label);
+}
+
+/** "Mom's gift", or "the gift" / "the order" without a recipient. */
+function giftOf(s: Session, p: Purchase): string {
+  const r = p.recipient_id ? s.mandate?.recipients.find((x) => x.id === p.recipient_id) : undefined;
+  return r ? `${r.name}'s gift` : "the order";
+}
+
+/**
+ * Simulated fulfilment: right after a capture, "ship" the gift with a demo carrier and register the
+ * tracking number with PayPal for that capture. Never fails the purchase: a PayPal error is logged in
+ * the ledger and the purchase stays charged without a shipment. Caller holds the session lock.
+ */
+export async function shipPurchase(s: Session, p: Purchase, label = ""): Promise<void> {
+  if (p.status !== "charged" || !p.paypal.capture_id || p.shipment || !rail.track || !s.mandate) return;
+  const tracking = demoTrackingNumber();
+  try {
+    const t = await rail.track(s.mandate, {
+      purchaseId: p.id,
+      orderId: p.paypal.order_id,
+      captureId: p.paypal.capture_id,
+      trackingNumber: tracking,
+      carrier: DEMO_CARRIER,
+      carrierNameOther: DEMO_CARRIER_NAME,
+      items: p.items.map((i) => ({ name: i.title.slice(0, 127), quantity: String(i.qty) })),
+    });
+    p.shipment = {
+      carrier: DEMO_CARRIER,
+      carrier_name: DEMO_CARRIER_NAME,
+      tracking_number: tracking,
+      status: "SHIPPED",
+      tracker_id: t.tracker_id,
+      shipped_at: new Date().toISOString(),
+    };
+    addLedger(s, {
+      actor: "paypal",
+      action: "paypal.tracking",
+      summary:
+        rail.mode === "mock"
+          ? `${label}MOCK shipment: ${giftOf(s, p)} shipped with tracking ${tracking} (${DEMO_CARRIER_NAME})`
+          : `${label}Shipped ${giftOf(s, p)}: tracking ${tracking} added to the PayPal ${t.via === "orders" ? "order" : "capture"} (${DEMO_CARRIER_NAME})`,
+      paypal_id: t.tracker_id,
+      purchase_id: p.id,
+    });
+  } catch (e) {
+    p.shipment = null;
+    addLedger(s, {
+      actor: "paypal",
+      action: "paypal.tracking_failed",
+      summary: `${label}PayPal tracking failed: ${errMsg(e)}. The gift is still paid; it just has no tracking number.`,
+      paypal_id: p.paypal.capture_id,
+      purchase_id: p.id,
+    });
+  }
 }
 
 export async function proposePurchase(
@@ -454,6 +511,7 @@ export async function proposePurchase(
       error: null,
       created_at: new Date().toISOString(),
       recipient_id: recipient?.id ?? null,
+      shipment: null,
     };
     s.purchases.push(p);
     addLedger(s, {
@@ -624,6 +682,7 @@ export async function completePurchaseApproval(s: Session, id: string): Promise<
       p.error = errMsg(e);
       addLedger(s, { actor: "paypal", action: "paypal.error", summary: `Capture failed: ${p.error}`, amount: p.total, purchase_id: p.id });
     }
+    if (p.status === "charged") await shipPurchase(s, p);
     touch(s);
     return p;
   });
@@ -677,6 +736,118 @@ export function recordSearch(
     recipient_id: recipient?.id ?? null,
   });
   touch(s);
+}
+
+// ---------------------------------------------------------------- PayPal webhooks
+
+/** The part of a PayPal webhook event Ribbon reads (verified before it gets here). */
+export interface PayPalWebhookEvent {
+  id: string;
+  event_type: string;
+  resource_type?: string;
+  summary?: string;
+  create_time?: string;
+  resource?: any;
+}
+
+export type WebhookOutcome =
+  | { matched: false; reason: string }
+  | { matched: true; duplicate: boolean; session_id: string; ledger_id: string | null; summary: string };
+
+/** Event ids already seen that matched no session: log them once, not on every PayPal retry. */
+const unmatchedSeen = new Set<string>();
+const MAX_EVENT_IDS = 200;
+
+type ResourceKind = "capture" | "refund" | "authorization" | "order" | "other";
+
+function resourceKind(eventType: string): ResourceKind {
+  if (eventType === "PAYMENT.CAPTURE.REFUNDED") return "refund";
+  if (eventType.startsWith("PAYMENT.CAPTURE.")) return "capture";
+  if (eventType.startsWith("PAYMENT.AUTHORIZATION.")) return "authorization";
+  if (eventType.startsWith("CHECKOUT.ORDER.")) return "order";
+  return "other";
+}
+
+/** The capture a refund belongs to, from its `up` link (…/v2/payments/captures/{id}). */
+function upCaptureId(resource: any): string | null {
+  const href = (resource?.links ?? []).find((l: any) => l?.rel === "up")?.href;
+  return typeof href === "string" ? (/\/captures\/([A-Za-z0-9]+)/.exec(href)?.[1] ?? null) : null;
+}
+
+interface WebhookMatch {
+  purchase: Purchase | null;
+  mandate: Mandate | null;
+  noun: string;
+}
+
+/** Find what this event is about in one session, by PayPal id first, then by our own invoice/custom ids. */
+function matchWebhook(s: Session, kind: ResourceKind, r: any): WebhookMatch | null {
+  const rid = typeof r?.id === "string" ? r.id : null;
+  if (!rid) return null;
+  const invoice = typeof r?.invoice_id === "string" ? r.invoice_id : null;
+  const purchases = s.purchases;
+  const m = s.mandate;
+  const byPurchase = (p: Purchase | undefined, noun: string): WebhookMatch | null => (p ? { purchase: p, mandate: m && m.id === p.mandate_id ? m : null, noun } : null);
+  switch (kind) {
+    case "capture":
+      return byPurchase(purchases.find((p) => p.paypal.capture_id === rid) ?? (invoice ? purchases.find((p) => p.id === invoice) : undefined), "capture");
+    case "refund": {
+      const up = upCaptureId(r);
+      return byPurchase(
+        purchases.find((p) => p.paypal.refund_id === rid) ??
+          (invoice ? purchases.find((p) => `${p.id}-r` === invoice) : undefined) ??
+          (up ? purchases.find((p) => p.paypal.capture_id === up) : undefined),
+        "refund",
+      );
+    }
+    case "authorization":
+      return m && m.paypal.authorization_id === rid ? { purchase: null, mandate: m, noun: "authorization" } : null;
+    case "order":
+      if (m && m.paypal.order_id === rid) return { purchase: null, mandate: m, noun: "order" };
+      // per_purchase rail: every purchase has its own order.
+      return byPurchase(purchases.find((p) => p.paypal.order_id === rid && p.paypal.order_id !== m?.paypal.order_id), "order");
+    default:
+      if (m && (m.paypal.authorization_id === rid || m.paypal.order_id === rid)) return { purchase: null, mandate: m, noun: "PayPal object" };
+      return byPurchase(purchases.find((p) => p.paypal.capture_id === rid || p.paypal.refund_id === rid), "PayPal object");
+  }
+}
+
+/**
+ * A verified PayPal webhook becomes one ledger row in the session that owns the capture, refund,
+ * authorization or order. A confirmation trail only: balances, statuses and envelopes never change here
+ * (the policy engine and the rail are the source of truth, so a missed or late webhook changes nothing).
+ * Idempotent by event id. Events about unknown resources only get a log line.
+ */
+export function recordPayPalWebhook(event: PayPalWebhookEvent, sessions: Iterable<Session> = allSessions()): WebhookOutcome {
+  const kind = resourceKind(event.event_type);
+  const r = event.resource ?? {};
+  for (const s of sessions) {
+    const hit = matchWebhook(s, kind, r);
+    if (!hit) continue;
+    if (s.webhook_event_ids.includes(event.id)) {
+      return { matched: true, duplicate: true, session_id: s.id, ledger_id: null, summary: "" };
+    }
+    const status = typeof r.status === "string" ? r.status : "";
+    const who = hit.purchase ? forWho(s, hit.purchase) : "";
+    const summary = `PayPal confirmed: ${hit.noun} ${r.id}${status ? ` ${status}` : ""}${who} (webhook ${event.event_type})`;
+    const row = addLedger(s, {
+      actor: "paypal",
+      action: "paypal.webhook",
+      summary,
+      paypal_id: r.id,
+      purchase_id: hit.purchase?.id ?? null,
+    });
+    s.webhook_event_ids.push(event.id);
+    if (s.webhook_event_ids.length > MAX_EVENT_IDS) s.webhook_event_ids.splice(0, s.webhook_event_ids.length - MAX_EVENT_IDS);
+    touch(s);
+    return { matched: true, duplicate: false, session_id: s.id, ledger_id: row.id, summary };
+  }
+  if (!unmatchedSeen.has(event.id)) {
+    unmatchedSeen.add(event.id);
+    if (unmatchedSeen.size > 1000) unmatchedSeen.delete(unmatchedSeen.values().next().value as string);
+    console.log(`[paypal] webhook ${event.event_type} ${event.id}: resource ${r?.id ?? "(none)"} is not in any session; logged only`);
+  }
+  return { matched: false, reason: `No session has ${kind} ${r?.id ?? "(no id)"}` };
 }
 
 export { remaining };

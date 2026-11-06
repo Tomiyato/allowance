@@ -4,7 +4,7 @@ import { createMockRail } from "./mock.ts";
 import { createPerPurchaseRail } from "./per-purchase.ts";
 import type { PaymentRail } from "./rail.ts";
 
-export type { PaymentRail, ChargeResult, RailUrls } from "./rail.ts";
+export type { PaymentRail, ChargeResult, RailUrls, TrackRequest, TrackResult } from "./rail.ts";
 export { PaymentError } from "./rail.ts";
 
 function select(): PaymentRail {

@@ -98,6 +98,19 @@ export interface Purchase {
   created_at: string;
   /** Gift list: who this purchase is for; null on legacy mandates. */
   recipient_id: string | null;
+  /** Simulated fulfilment registered with PayPal after the capture; null/absent until shipped or when tracking failed. */
+  shipment?: Shipment | null;
+}
+
+/** A demo shipment registered with PayPal for one capture (Orders v2 track, or v1 trackers-batch as fallback). */
+export interface Shipment {
+  carrier: string; // PayPal carrier enum, "OTHER" for the demo carrier
+  carrier_name: string | null; // carrier_name_other, e.g. "Ribbon demo shipping"
+  tracking_number: string; // "RIB…", generated
+  status: "SHIPPED";
+  /** PayPal tracker id (`{capture_id}-{tracking_number}`). */
+  tracker_id: string | null;
+  shipped_at: string; // ISO
 }
 
 export type LedgerActor = "user" | "agent" | "policy" | "paypal";
@@ -152,6 +165,40 @@ export interface BuyGiftPlanOutput {
   recipients: RecipientStatus[];
 }
 
+/**
+ * Read-only tools from the official PayPal Agent Toolkit (@paypal/agent-toolkit) that the agent may call.
+ * The allowlist lives in server/agent/paypal-toolkit.ts; money-moving toolkit tools are never registered.
+ */
+export type PayPalToolkitToolName = "get_order" | "get_refund" | "get_shipment_tracking";
+
+/** One record from PayPal's own data, as returned by a toolkit lookup. */
+export interface PayPalRecord {
+  kind: "order" | "authorization" | "capture" | "refund" | "tracker";
+  id: string;
+  status: string;
+  amount: number | null;
+  currency: string | null;
+  time: string | null;
+  /** The Ribbon purchase this record belongs to, matched by PayPal's invoice_id or capture id; null if none. */
+  purchase_id: string | null;
+  recipient_id: string | null;
+  recipient_name: string | null;
+  gift: string | null;
+  /** Extra PayPal detail, e.g. "carrier UPS, tracking 1Z…" or "refund of capture 3C…". */
+  note: string | null;
+}
+
+/** Output of every PayPal Agent Toolkit tool (get_order, get_refund, get_shipment_tracking). */
+export interface PayPalCheckOutput {
+  source: "paypal_agent_toolkit";
+  tool: PayPalToolkitToolName;
+  /** The PayPal id the agent looked up. */
+  lookup_id: string;
+  ok: boolean;
+  error: string | null;
+  records: PayPalRecord[];
+}
+
 export type AgentToolName =
   | "search_products"
   | "get_mandate"
@@ -160,4 +207,5 @@ export type AgentToolName =
   | "list_purchases"
   | "report_suspicious_content"
   | "search_gifts"
-  | "buy_gift_plan";
+  | "buy_gift_plan"
+  | PayPalToolkitToolName;

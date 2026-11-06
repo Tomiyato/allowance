@@ -6,6 +6,7 @@
 import type { PaymentRail } from "./rail.ts";
 import { PaymentError } from "./rail.ts";
 import { approveLink, money, paypal, PAYPAL_BRAND_NAME, PAYPAL_REFUND_NOTE, PAYPAL_SOFT_DESCRIPTOR } from "./client.ts";
+import { trackCapture } from "./tracking.ts";
 
 export function createAuthorizationRail(): PaymentRail {
   return {
@@ -95,6 +96,12 @@ export function createAuthorizationRail(): PaymentRail {
       });
       if (!r?.id) throw new PaymentError("Refund response has no id.", undefined, r?.debug_id, r);
       return { refund_id: r.id };
+    },
+
+    // Verified against the PayPal sandbox on 2026-11-06 (docs/research/paypal-sandbox-results.md, shipment tracking):
+    // Orders v2 track accepts a capture made from this AUTHORIZE order; trackers-batch is the fallback.
+    async track(m, req) {
+      return trackCapture({ ...req, orderId: req.orderId ?? m.paypal.order_id });
     },
 
     // Verified against the PayPal sandbox on 2026-11-05 (docs/research/paypal-sandbox-results.md, void matrix):

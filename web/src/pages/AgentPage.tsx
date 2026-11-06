@@ -6,13 +6,14 @@ import type {
   GetMandateOutput,
   ListPurchasesOutput,
   MandateStatus,
+  PayPalCheckOutput,
   ProposePurchaseOutput,
   ReportSuspiciousOutput,
   RequestRefundOutput,
   SearchGiftsOutput,
   SearchProductsOutput,
 } from "../../../shared/types";
-import { api } from "../api";
+import { api, isFixture } from "../api";
 import { Markdown } from "../components/Markdown";
 import {
   FlaggedCard,
@@ -28,11 +29,14 @@ import {
   ToolPending,
 } from "../components/cards";
 import { Icon } from "../components/Icon";
+import { isPayPalToolkitTool, PayPalCheckCard, PayPalCheckError, PayPalCheckPending } from "../components/paypalToolCards";
 import { money } from "../format";
 import { Link } from "../router";
 import { useStore, type Simulation } from "../store";
 
 const SUGGESTIONS = ["Shop my whole gift list", "Find Mom something under $60", "Order a robot vacuum", "Return Sam's gift"];
+/** Answered from PayPal's own records by the read-only PayPal Agent Toolkit tools (real PayPal rail only). */
+const PAYPAL_SUGGESTION = "What did PayPal record for Mom?";
 
 type Part = UIMessage["parts"][number];
 
@@ -60,6 +64,14 @@ function ToolPart({ part }: { part: Part }) {
   if (!isToolUIPart(part)) return null;
   const name = getToolName(part);
   const p = part;
+
+  if (isPayPalToolkitTool(name)) {
+    if (p.state === "output-error") return <PayPalCheckError text={p.errorText || "unknown error"} />;
+    if (p.state === "output-denied") return <PayPalCheckError text="denied" />;
+    if (p.state !== "output-available") return <PayPalCheckPending name={name} />;
+    const o = p.output as PayPalCheckOutput | null;
+    return o && Array.isArray(o.records) ? <PayPalCheckCard output={o} /> : <GenericToolCard name={name} output={p.output} />;
+  }
 
   if (p.state === "output-error") return <ToolError name={name} text={p.errorText || "unknown error"} />;
   if (p.state === "output-denied") return <ToolError name={name} text="denied" />;
@@ -175,6 +187,7 @@ export function AgentPage() {
   const busy = status === "submitted" || status === "streaming";
   const m = state?.mandate ?? null;
   const canSpend = m?.status === "active";
+  const suggestions = state && (state.mode.payment !== "mock" || isFixture) ? [...SUGGESTIONS, PAYPAL_SUGGESTION] : SUGGESTIONS;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -296,7 +309,7 @@ export function AgentPage() {
 
       <div className="composer-wrap">
         <div className="suggestions" aria-label="Suggested requests">
-          {SUGGESTIONS.map((s) => (
+          {suggestions.map((s) => (
             <button key={s} type="button" className="chip chip-suggest" onClick={() => send(s)} disabled={busy}>
               {s}
             </button>

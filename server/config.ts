@@ -31,6 +31,10 @@ export const config = {
   port: Number(env("PORT") ?? 3000),
   /** Absolute base URL for PayPal return links; derived from the request when unset. */
   publicUrl: env("PUBLIC_URL")?.replace(/\/$/, ""),
+  /** Set by Render on every web service (https://<name>.onrender.com); fallback public URL for webhook registration. */
+  renderExternalUrl: env("RENDER_EXTERNAL_URL")?.replace(/\/$/, ""),
+  /** Optional override: the PayPal webhook id to verify events against. Otherwise found or created at startup. */
+  paypalWebhookId: env("PAYPAL_WEBHOOK_ID"),
   production: env("NODE_ENV") === "production",
 
   aiProvider: (env("AI_PROVIDER") === "groq" ? "groq" : "google") as "google" | "groq",

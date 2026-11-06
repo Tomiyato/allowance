@@ -44,6 +44,8 @@ export interface PayPalRequest {
   method: "GET" | "POST" | "PATCH" | "DELETE";
   path: string;
   body?: unknown;
+  /** A pre-serialized JSON body, sent byte for byte (webhook verification embeds the raw event). Wins over body. */
+  rawJson?: string;
   /** Stable key for retries of the same logical operation (PayPal-Request-Id). */
   requestId?: string;
 }
@@ -61,7 +63,7 @@ export async function paypal<T = any>(req: PayPalRequest): Promise<T> {
     const res = await fetch(`${BASE}${req.path}`, {
       method: req.method,
       headers,
-      body: req.body === undefined ? undefined : JSON.stringify(req.body),
+      body: req.rawJson ?? (req.body === undefined ? undefined : JSON.stringify(req.body)),
     });
     if (res.status === 401 && retryAuth) {
       cached = null;

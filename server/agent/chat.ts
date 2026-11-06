@@ -3,8 +3,12 @@ import type { Request, Response } from "express";
 import { convertToModelMessages, isStepCount, streamText, type UIMessage } from "ai";
 import { addLedger, mandatePurchases, recipientStatuses, refreshMandateStatus, remaining, touch, type Session } from "../store.ts";
 import { isRateLimit, model, RATE_LIMIT_MESSAGE } from "./model.ts";
+import { loadPayPalToolkit, toolkitEnabled } from "./paypal-toolkit.ts";
 import { agentInstructions } from "./prompt.ts";
 import { buildTools } from "./tools.ts";
+
+// Warm the PayPal Agent Toolkit (a ~1.5 s import) in the background so the first chat turn does not wait on it.
+if (toolkitEnabled()) void loadPayPalToolkit();
 
 const MAX_HISTORY = 16;
 // search_gifts + report_suspicious_content + buy_gift_plan + summary fit easily; room for a retry.
@@ -40,7 +44,8 @@ export async function handleChat(req: Request, res: Response, session: Session, 
   if (text) addLedger(session, { actor: "user", action: "agent.task", summary: `You asked the agent: "${text.slice(0, 160)}"` });
 
   refreshMandateStatus(session);
-  const tools = buildTools({ session, baseUrl });
+  const paypalToolkit = await loadPayPalToolkit();
+  const tools = buildTools({ session, baseUrl, paypalToolkit });
 
   let modelMessages;
   try {
@@ -59,6 +64,7 @@ export async function handleChat(req: Request, res: Response, session: Session, 
     instructions: agentInstructions(session.mandate, remaining(session), new Date(), {
       recipients: recipientStatuses(session),
       purchases: mandatePurchases(session),
+      paypalLookups: Boolean(paypalToolkit && Object.keys(paypalToolkit).length),
     }),
     messages: modelMessages,
     tools,

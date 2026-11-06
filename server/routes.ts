@@ -11,12 +11,15 @@ import {
   finalizeApproval,
   HttpError,
   refundPurchase,
+  recordPayPalWebhook,
   rejectPurchase,
   remaining,
   revokeMandate,
   simulateHijackedAgent,
   startApproval,
+  type PayPalWebhookEvent,
 } from "./service.ts";
+import { handlePayPalWebhook } from "./paypal/webhooks.ts";
 import type { ProposePurchaseOutput } from "../shared/types.ts";
 import { appState, createSession, findSessionByMandate, getSession, type Session } from "./store.ts";
 
@@ -133,11 +136,8 @@ export function apiRouter(): Router {
     }),
   );
 
-  // Stretch (SPEC §5): PayPal webhooks -> ledger rows. Accepted and logged only for now.
-  r.post("/paypal/webhook", (req, res) => {
-    console.log("[paypal] webhook received:", req.body?.event_type ?? "(unknown)");
-    res.sendStatus(200);
-  });
+  // POST /api/paypal/webhook is mounted in index.ts before the JSON parser and the session cookie
+  // (paypalWebhookHandler below): it needs the raw body, and PayPal has no session.
 
   r.use((_req, res) => {
     res.status(404).json({ error: "Not found" });
@@ -190,6 +190,18 @@ export function paypalReturnRouter(): Router {
 
   return r;
 }
+
+/**
+ * POST /api/paypal/webhook. Mount with a raw body parser and without sessionMiddleware:
+ *   app.post("/api/paypal/webhook", express.raw({ type: "*\/*" }), paypalWebhookHandler)
+ * Verified events become one "paypal.webhook" ledger row in the session that owns the resource.
+ */
+export const paypalWebhookHandler = wrap(async (req, res) => {
+  const out = await handlePayPalWebhook({ headers: req.headers, rawBody: req.body as Buffer | undefined }, (event) =>
+    recordPayPalWebhook(event as PayPalWebhookEvent),
+  );
+  res.status(out.status).json(out.body);
+});
 
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
   if (res.headersSent) {

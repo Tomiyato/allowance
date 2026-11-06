@@ -31,6 +31,9 @@ export function createMockRail(): PaymentRail {
     async refund() {
       return { refund_id: fakeId() };
     },
+    async track(_m, req) {
+      return { tracker_id: `${req.captureId}-${req.trackingNumber}`, via: "mock" };
+    },
     async revoke(m) {
       return { paypal_id: m.paypal.authorization_id };
     },

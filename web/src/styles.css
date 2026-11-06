@@ -1440,6 +1440,39 @@ code {
   padding: 1px 5px;
   user-select: all;
 }
+/* Demo shipment registered with PayPal after a capture ("Shipped · tracking RIB…"). */
+.ship-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--ok);
+}
+.ship-line > svg {
+  flex: none;
+}
+.ship-line code {
+  color: var(--ink);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-line);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 12px;
+  user-select: all;
+}
+.ship-carrier {
+  color: var(--muted);
+  font-size: 12px;
+}
+.ship-line-compact {
+  margin-top: 2px;
+  font-size: 12px;
+}
+.env-ship {
+  flex-basis: 100%;
+}
 .card-actions {
   display: flex;
   justify-content: flex-end;

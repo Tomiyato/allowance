@@ -4,6 +4,7 @@
 import type { PaymentRail } from "./rail.ts";
 import { PaymentError } from "./rail.ts";
 import { approveLink, money, paypal, PAYPAL_BRAND_NAME, PAYPAL_REFUND_NOTE } from "./client.ts";
+import { trackCapture } from "./tracking.ts";
 
 export function createPerPurchaseRail(): PaymentRail {
   return {
@@ -75,6 +76,11 @@ export function createPerPurchaseRail(): PaymentRail {
       });
       if (!r?.id) throw new PaymentError("Refund response has no id.", undefined, r?.debug_id, r);
       return { refund_id: r.id };
+    },
+
+    // Same tracking call as the authorization rail; here the order is the purchase's own CAPTURE order.
+    async track(_m, req) {
+      return trackCapture(req);
     },
 
     async revoke() {

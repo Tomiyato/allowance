@@ -172,6 +172,15 @@ function flagOut(): ReportSuspiciousOutput {
 // ---------- purchases ----------
 
 const noPaypal = { order_id: null, capture_id: null, refund_id: null, approve_url: null };
+/** Demo shipment Ribbon registers with PayPal right after a capture. */
+const shipped = (captureId: string, tracking: string, minute: number) => ({
+  carrier: "OTHER",
+  carrier_name: "Ribbon demo shipping",
+  tracking_number: tracking,
+  status: "SHIPPED" as const,
+  tracker_id: `${captureId}-${tracking}`,
+  shipped_at: at(minute),
+});
 const allowReason = (r: Recipient, left: number) =>
   `Inside ${r.name}'s envelope (${round2(left).toFixed(2)} left), category allowed, under the $45.00 ask-me amount.`;
 
@@ -201,6 +210,7 @@ export const fixturePurchases: Purchase[] = [
     reasons: [allowReason(dad, 50)],
     rationale: "A coffee nerd will use a gooseneck pour-over set every morning; the electric grinder is electronics.",
     paypal: { order_id: "5O190127TN364715T", capture_id: "2GG279541U471931P", refund_id: null, approve_url: null },
+    shipment: shipped("2GG279541U471931P", "RIB4K7Q2M9XD3P", 5.1),
     error: null,
     created_at: at(5.1),
   },
@@ -215,6 +225,7 @@ export const fixturePurchases: Purchase[] = [
     reasons: [allowReason(leo, 30)],
     rationale: "Hands-on and dinosaur-themed, with $5 to spare in Leo's envelope.",
     paypal: { order_id: "5O190127TN364715T", capture_id: "7NW99137CU6152403", refund_id: null, approve_url: null },
+    shipment: shipped("7NW99137CU6152403", "RIB8T1V6H2NC5W", 5.2),
     error: null,
     created_at: at(5.2),
   },
@@ -229,6 +240,7 @@ export const fixturePurchases: Purchase[] = [
     reasons: [allowReason(sam, 30)],
     rationale: "A proper size-4 ball for his age, with a pump so it stays playable.",
     paypal: { order_id: "5O190127TN364715T", capture_id: "4KX61822VB300571M", refund_id: null, approve_url: null },
+    shipment: shipped("4KX61822VB300571M", "RIB3R9F5Y7LA2K", 5.3),
     error: null,
     created_at: at(5.3),
   },
@@ -317,12 +329,16 @@ export const fixtureLedger: LedgerRow[] = [
   row(12, 5.1, "agent", "purchase.proposed", `Proposed ${pourOver.title} ×1 for Dad`, { amount: 42, purchase_id: dadP.id, remaining_budget: 200, recipient_id: dad.id }),
   row(13, 5.1, "policy", "policy.allow", "Allowed: inside Dad's envelope and every rule", { decision: "allow", reasons: dadP.reasons, purchase_id: dadP.id, remaining_budget: 200, recipient_id: dad.id }),
   row(14, 5.1, "paypal", "paypal.capture", "PayPal captured $42.00 for Dad", { amount: 42, paypal_id: dadP.paypal.capture_id, purchase_id: dadP.id, remaining_budget: 158, recipient_id: dad.id }),
+  row(26, 5.1, "paypal", "paypal.tracking", `Shipped Dad's gift: tracking ${dadP.shipment!.tracking_number} added to the PayPal order (Ribbon demo shipping)`, { paypal_id: dadP.shipment!.tracker_id, purchase_id: dadP.id, remaining_budget: 158, recipient_id: dad.id }),
   row(15, 5.2, "agent", "purchase.proposed", `Proposed ${fossilKit.title} ×1 for Leo`, { amount: 24.99, purchase_id: leoP.id, remaining_budget: 158, recipient_id: leo.id }),
   row(16, 5.2, "policy", "policy.allow", "Allowed: inside Leo's envelope and every rule", { decision: "allow", reasons: leoP.reasons, purchase_id: leoP.id, remaining_budget: 158, recipient_id: leo.id }),
   row(17, 5.2, "paypal", "paypal.capture", "PayPal captured $24.99 for Leo", { amount: 24.99, paypal_id: leoP.paypal.capture_id, purchase_id: leoP.id, remaining_budget: 133.01, recipient_id: leo.id }),
+  row(27, 5.2, "paypal", "paypal.tracking", `Shipped Leo's gift: tracking ${leoP.shipment!.tracking_number} added to the PayPal order (Ribbon demo shipping)`, { paypal_id: leoP.shipment!.tracker_id, purchase_id: leoP.id, remaining_budget: 133.01, recipient_id: leo.id }),
   row(18, 5.3, "agent", "purchase.proposed", `Proposed ${soccerBall.title} ×1 for Sam`, { amount: 27.5, purchase_id: samP.id, remaining_budget: 133.01, recipient_id: sam.id }),
   row(19, 5.3, "policy", "policy.allow", "Allowed: inside Sam's envelope and every rule", { decision: "allow", reasons: samP.reasons, purchase_id: samP.id, remaining_budget: 133.01, recipient_id: sam.id }),
   row(20, 5.3, "paypal", "paypal.capture", "PayPal captured $27.50 for Sam", { amount: 27.5, paypal_id: samP.paypal.capture_id, purchase_id: samP.id, remaining_budget: 105.51, recipient_id: sam.id }),
+  row(28, 5.3, "paypal", "paypal.tracking", `Shipped Sam's gift: tracking ${samP.shipment!.tracking_number} added to the PayPal order (Ribbon demo shipping)`, { paypal_id: samP.shipment!.tracker_id, purchase_id: samP.id, remaining_budget: 105.51, recipient_id: sam.id }),
+  row(29, 5.35, "paypal", "paypal.webhook", `PayPal confirmed: capture ${dadP.paypal.capture_id} COMPLETED for Dad (webhook PAYMENT.CAPTURE.COMPLETED)`, { paypal_id: dadP.paypal.capture_id, purchase_id: dadP.id, remaining_budget: 105.51, recipient_id: dad.id }),
   row(21, 5.4, "agent", "purchase.proposed", `Proposed ${deskFan.title} ×1 for Office Secret Santa`, { amount: 28, purchase_id: officeP.id, remaining_budget: 105.51, recipient_id: office.id }),
   row(22, 5.4, "policy", "policy.deny", "Blocked: electronics are not allowed on this gift list", { decision: "deny", reasons: officeP.reasons, purchase_id: officeP.id, remaining_budget: 105.51, recipient_id: office.id }),
   row(23, 8, "user", "agent.task", 'You asked the agent: "Order a robot vacuum"', { remaining_budget: 105.51 }),

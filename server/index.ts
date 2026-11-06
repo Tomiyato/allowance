@@ -3,11 +3,14 @@ import { fileURLToPath } from "node:url";
 import cookieParser from "cookie-parser";
 import express from "express";
 import { aiLabel, config } from "./config.ts";
-import { apiRouter, errorHandler, paypalReturnRouter, sessionMiddleware } from "./routes.ts";
+import { initPayPalWebhooks, WEBHOOK_PATH } from "./paypal/webhooks.ts";
+import { apiRouter, errorHandler, paypalReturnRouter, paypalWebhookHandler, sessionMiddleware } from "./routes.ts";
 
 const app = express();
 app.set("trust proxy", 1); // Render terminates TLS in front of us
 app.disable("x-powered-by");
+// PayPal webhooks: raw body (signature verification needs the exact bytes) and no session cookie.
+app.post(WEBHOOK_PATH, express.raw({ type: "*/*", limit: "1mb" }), paypalWebhookHandler);
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
@@ -39,6 +42,7 @@ const server = app.listen(config.port, () => {
     `[server] Ribbon on http://localhost:${config.port} | payment=${config.paymentMode} products=${config.productSource}` +
       `${config.demoInjection ? " (demo injection on)" : ""} ai=${aiLabel()}`,
   );
+  initPayPalWebhooks();
 });
 server.on("error", (err: NodeJS.ErrnoException) => {
   console.error(`[server] cannot listen on port ${config.port}: ${err.code ?? err.message}. Set PORT to a free port.`);

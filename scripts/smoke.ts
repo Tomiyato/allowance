@@ -1,5 +1,7 @@
 // End-to-end smoke test of the gift list (GIFTLIST_SPEC §4) against a running server.
 // Uses the real AI model (Gemini, Groq fallback) and whatever payment rail the server runs.
+// Every charged gift must carry a demo shipment (carrier "Ribbon demo shipping", tracking RIB…) that the
+// server registered with PayPal right after the capture (MOCK tracker ids on the mock rail).
 //
 //   PORT=3201 PAYMENT_MODE=mock npm start          # terminal 1
 //   BASE_URL=http://localhost:3201 npm run smoke    # terminal 2
@@ -124,6 +126,18 @@ const state = () => json<AppState>("GET", "/api/state");
 const byName = (st: AppState, name: string) => st.recipients.find((r) => r.recipient.name.toLowerCase() === name);
 const purchaseOf = (st: AppState, id: string) => st.purchases.find((p) => p.id === id);
 
+/** Every charged gift gets a demo shipment registered with PayPal right after its capture. */
+function checkShipped(st: AppState, when: string) {
+  const charged = st.purchases.filter((p) => p.status === "charged");
+  for (const p of charged) {
+    if (p.shipment) console.log(`  shipped ${p.id}: ${p.shipment.carrier_name ?? p.shipment.carrier} ${p.shipment.tracking_number} (PayPal tracker ${p.shipment.tracker_id})`);
+  }
+  const missing = charged.filter((p) => !(p.shipment?.status === "SHIPPED" && /^RIB[0-9A-Z]+$/.test(p.shipment.tracking_number) && p.shipment.tracker_id));
+  check(charged.length > 0 && missing.length === 0, `${when}: each charged gift has a shipment (${charged.length - missing.length} of ${charged.length})`);
+  const rows = new Set(st.ledger.filter((r) => r.action === "paypal.tracking").map((r) => r.purchase_id));
+  check(charged.every((p) => rows.has(p.id)), `${when}: a paypal.tracking ledger row for each charged gift`);
+}
+
 function printList(st: AppState) {
   for (const r of st.recipients) {
     const latest = r.purchase_ids.map((id) => purchaseOf(st, id)).find(Boolean);
@@ -221,6 +235,7 @@ async function main() {
   const tools = toolNames(convo.assistant);
   check(tools.includes("search_gifts") && tools.includes("buy_gift_plan"), `used search_gifts and buy_gift_plan (${tools.join(", ")})`);
   printList(st);
+  checkShipped(st, "after the list run");
   const covered = st.recipients.filter((r) => r.state === "bought" || r.state === "waiting_approval");
   check(covered.length >= 4, `at least 4 recipients bought or waiting (${covered.length})`);
   const noneOver = (s: AppState) => s.recipients.every((r) => r.spent <= r.recipient.envelope + 1e-9);
@@ -254,6 +269,7 @@ async function main() {
     mom = byName(st, "mom")!;
     check(purchase.status === "charged" && purchase.paypal.capture_id, `approved and charged (capture ${purchase.paypal.capture_id})`);
     check(mom.state === "bought" && mom.spent <= mom.recipient.envelope, `Mom bought, $${mom.spent} of $${mom.recipient.envelope}`);
+    check(purchase.shipment?.status === "SHIPPED", `Mom's approved gift shipped (tracking ${purchase.shipment?.tracking_number ?? "none"})`);
   }
 
   console.log(`\n5. Chat: robot vacuum (pause ${PAUSE_MS / 1000}s)`);
@@ -285,6 +301,7 @@ async function main() {
     check(Math.abs(st.remaining - (remBefore + p.total)) < 0.01, `total remaining $${remBefore} -> $${st.remaining}`);
   } else check(false, "refund skipped: nothing charged outside Mom");
   check(noneOver(st), "still no envelope exceeded");
+  checkShipped(st, "before revoke");
 
   console.log("\n7. Revoke");
   const rev = await json<{ mandate: Mandate }>("POST", `/api/mandates/${mandate.id}/revoke`);

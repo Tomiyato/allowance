@@ -11,6 +11,7 @@ import type {
   RequestRefundOutput,
   SearchGiftsOutput,
   SearchProductsOutput,
+  Shipment,
 } from "../../../shared/types";
 import { api } from "../api";
 import { dateTime, money } from "../format";
@@ -140,6 +141,24 @@ function PaypalId({ label, value }: { label: string; value: string | null }) {
   );
 }
 
+/** "Shipped · tracking RIB…": the demo shipment Ribbon registered with PayPal for this capture. */
+export function ShipmentLine({ shipment, compact }: { shipment: Shipment | null | undefined; compact?: boolean }) {
+  if (!shipment) return null;
+  const carrier = shipment.carrier === "OTHER" ? (shipment.carrier_name ?? "Other carrier") : shipment.carrier;
+  return (
+    <div
+      className={`ship-line ${compact ? "ship-line-compact" : ""}`}
+      title={`${carrier}. Tracking added to the PayPal ${shipment.tracker_id ? `order (tracker ${shipment.tracker_id})` : "capture"}. Simulated fulfilment for the demo.`}
+    >
+      <Icon name="box" size={compact ? 14 : 15} />
+      <span>
+        Shipped · tracking <code>{shipment.tracking_number}</code>
+      </span>
+      {!compact && <span className="ship-carrier">{carrier}</span>}
+    </div>
+  );
+}
+
 /** The name of the person a purchase is for, or null on a legacy purchase. */
 function useForName(p: Purchase): string | null {
   const { state } = useStore();
@@ -190,6 +209,7 @@ function Receipt({ p }: { p: Purchase }) {
           <PaypalId label="PayPal capture" value={p.paypal.capture_id} />
           <PaypalId label="PayPal refund" value={p.paypal.refund_id} />
         </div>
+        <ShipmentLine shipment={p.shipment} />
       </div>
       {p.status === "charged" && (
         <footer className="card-actions">
@@ -672,7 +692,12 @@ export function GiftPlanCard({ output }: { output: BuyGiftPlanOutput }) {
               <span className={`badge badge-plain ${planBadge[kind].cls}`}>{planBadge[kind].label}</span>
             </div>
             <div className="gp-detail">
-              {kind === "bought" && p && <PaypalId label="PayPal capture" value={p.paypal.capture_id} />}
+              {kind === "bought" && p && (
+                <>
+                  <PaypalId label="PayPal capture" value={p.paypal.capture_id} />
+                  <ShipmentLine shipment={p.shipment} compact />
+                </>
+              )}
               {kind === "refunded" && p && <PaypalId label="PayPal refund" value={p.paypal.refund_id} />}
               {kind === "waiting" && p && (
                 <>

@@ -1,5 +1,5 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
-import type { AppState, RequestRefundOutput, SearchProductsOutput } from "../../shared/types";
+import type { AppState, PayPalCheckOutput, PayPalRecord, Purchase, RequestRefundOutput, SearchProductsOutput } from "../../shared/types";
 import { api, fixtureSnapshot } from "./api";
 import { fixtureGiftOptions, fixturePurchases, fixtureProducts, giftSearchOutput } from "./fixtures";
 import { money } from "./format";
@@ -17,10 +17,57 @@ function personIn(prompt: string, s: AppState) {
   return s.mandate?.recipients.find((r) => lower.includes(r.name.toLowerCase())) ?? null;
 }
 
+/** What get_order (PayPal Agent Toolkit) would return for the fixture list's one PayPal order. */
+function fixtureOrderCheck(s: AppState): PayPalCheckOutput | null {
+  const m = s.mandate;
+  if (!m?.paypal.order_id) return null;
+  const who = (p: Purchase) => m.recipients.find((r) => r.id === p.recipient_id) ?? null;
+  const rec = (r: Partial<PayPalRecord> & Pick<PayPalRecord, "kind" | "id" | "status">, p: Purchase | null = null): PayPalRecord => ({
+    amount: null,
+    currency: "USD",
+    time: p?.created_at ?? m.created_at,
+    note: null,
+    purchase_id: p?.id ?? null,
+    recipient_id: p ? (who(p)?.id ?? null) : null,
+    recipient_name: p ? (who(p)?.name ?? null) : null,
+    gift: p ? p.items.map((i) => i.title).join(" + ") : null,
+    ...r,
+  });
+  const paid = s.purchases.filter((p) => p.paypal.capture_id && (p.status === "charged" || p.status === "refunded"));
+  const captured = paid.reduce((sum, p) => sum + p.total, 0);
+  const records: PayPalRecord[] = [
+    rec({ kind: "order", id: m.paypal.order_id, status: "COMPLETED", amount: m.budget_total, note: "intent AUTHORIZE" }),
+    ...(m.paypal.authorization_id
+      ? [rec({ kind: "authorization", id: m.paypal.authorization_id, status: captured > 0 ? "PARTIALLY_CAPTURED" : "CREATED", amount: m.budget_total })]
+      : []),
+    ...paid.map((p) => rec({ kind: "capture", id: p.paypal.capture_id!, status: p.status === "refunded" ? "REFUNDED" : "COMPLETED", amount: p.total }, p)),
+    ...paid
+      .filter((p) => p.paypal.refund_id)
+      .map((p) => rec({ kind: "refund", id: p.paypal.refund_id!, status: "COMPLETED", amount: p.total, note: `refund of capture ${p.paypal.capture_id}` }, p)),
+  ];
+  return { source: "paypal_agent_toolkit", tool: "get_order", lookup_id: m.paypal.order_id, ok: true, error: null, records };
+}
+
 /** Picks a canned turn for the prompt; the refund turn really refunds in the fixture store. */
 async function planTurn(prompt: string): Promise<Turn> {
   const s = fixtureSnapshot();
   const person = personIn(prompt, s);
+
+  // "What did PayPal record for Mom?" / "Did PayPal really refund Sam?": a read-only lookup, checked before
+  // the refund turn so that asking about a refund never issues one.
+  const check = /paypal/i.test(prompt) && /record|really|according|check|confirm|say/i.test(prompt) ? fixtureOrderCheck(s) : null;
+  if (check) {
+    const mine = check.records.filter((r) => person && r.recipient_id === person.id && (r.kind === "capture" || r.kind === "refund"));
+    const lines = mine.map((r) => `${r.kind === "refund" ? "a refund" : "a capture"} of ${money(r.amount ?? 0)} (${r.status.toLowerCase()}, ${r.id})`);
+    return {
+      tool: { name: "get_order", input: { id: check.lookup_id }, output: check },
+      reply: person
+        ? lines.length
+          ? `Fixture mode: PayPal's record for ${person.name} shows ${lines.join(" and ")} on your list's one PayPal order. With the backend running, this comes live from PayPal through the read-only Agent Toolkit.`
+          : `Fixture mode: PayPal has no payment for ${person.name} on your list's order yet.`
+        : "Fixture mode: here is what PayPal recorded on your list's one order. With the backend running, this comes live from PayPal through the read-only Agent Toolkit.",
+    };
+  }
 
   if (/return|refund/i.test(prompt)) {
     const charged = s.purchases

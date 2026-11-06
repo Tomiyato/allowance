@@ -271,10 +271,11 @@ describe("gift-list purchases", () => {
     const before = s.ledger.length;
     await proposePurchase(s, [{ product_id: "cat_dino_book", qty: 1 }], "x", BASE, "agent", id.leo);
     const rows = s.ledger.slice(before);
-    expect(rows.map((r) => r.action)).toEqual(["purchase.proposed", "policy.allow", "paypal.capture"]);
+    expect(rows.map((r) => r.action)).toEqual(["purchase.proposed", "policy.allow", "paypal.capture", "paypal.tracking"]);
     expect(rows.every((r) => r.recipient_id === id.leo)).toBe(true);
     expect(rows[0].summary).toContain("a gift for Leo");
     expect(rows[2].summary).toMatch(/for 1 x The Big Book of Dinosaurs \(hardcover\) for Leo$/);
+    expect(rows[3].summary).toMatch(/^MOCK shipment: Leo's gift shipped with tracking RIB[0-9A-Z]{10} \(Ribbon demo shipping\)$/);
   });
 
   it("revoke on the mock rail says voided and rejects pending gifts", async () => {

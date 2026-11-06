@@ -163,6 +163,18 @@ const fixtureApi: Api = {
     const rid = p.recipient_id;
     log({ ...blank, actor: "user", action: "purchase.approved", summary: `You approved ${p.items[0]?.title ?? "the purchase"}${who}`, purchase_id: p.id, decision: "allow", recipient_id: rid });
     log({ ...blank, actor: "paypal", action: "paypal.capture", summary: `PayPal captured $${p.total.toFixed(2)}${who}`, amount: p.total, paypal_id: p.paypal.capture_id, purchase_id: p.id, recipient_id: rid });
+    // Simulated fulfilment, as the server does after every capture.
+    const tracking = `RIB${fakeId(10)}`;
+    p.shipment = {
+      carrier: "OTHER",
+      carrier_name: "Ribbon demo shipping",
+      tracking_number: tracking,
+      status: "SHIPPED",
+      tracker_id: `${p.paypal.capture_id}-${tracking}`,
+      shipped_at: new Date().toISOString(),
+    };
+    const gift = fx.mandate?.recipients.find((x) => x.id === rid);
+    log({ ...blank, actor: "paypal", action: "paypal.tracking", summary: `Shipped ${gift ? `${gift.name}'s gift` : "the order"}: tracking ${tracking} added to the PayPal order (Ribbon demo shipping)`, paypal_id: p.shipment.tracker_id, purchase_id: p.id, recipient_id: rid });
     return { purchase: structuredClone(p) };
   },
   async rejectPurchase(id) {

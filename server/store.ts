@@ -19,6 +19,8 @@ export interface Session {
   last_source: "channel3" | "catalog" | null;
   /** provider:model that produced the last step of the most recent chat turn (after any fallback). */
   ai_active: string | null;
+  /** PayPal webhook event ids already written to this session's ledger (idempotency; newest last, capped). */
+  webhook_event_ids: string[];
 }
 
 export function newId(prefix: string): string {
@@ -49,11 +51,12 @@ function upgrade(s: Session): Session {
   return {
     ...s,
     mandate: s.mandate ? { ...s.mandate, recipients: s.mandate.recipients ?? [] } : null,
-    purchases: (s.purchases ?? []).map((p) => ({ ...p, recipient_id: p.recipient_id ?? null })),
+    purchases: (s.purchases ?? []).map((p) => ({ ...p, recipient_id: p.recipient_id ?? null, shipment: p.shipment ?? null })),
     ledger: (s.ledger ?? []).map((r) => ({ ...r, recipient_id: r.recipient_id ?? null })),
     products: s.products ?? {},
     last_source: s.last_source ?? null,
     ai_active: s.ai_active ?? null,
+    webhook_event_ids: s.webhook_event_ids ?? [],
   };
 }
 
@@ -95,10 +98,16 @@ export function createSession(): Session {
     products: {},
     last_source: null,
     ai_active: null,
+    webhook_event_ids: [],
   };
   sessions.set(s.id, s);
   scheduleSave();
   return s;
+}
+
+/** Every session in memory (PayPal webhooks are not tied to a cookie, so they search all of them). */
+export function allSessions(): IterableIterator<Session> {
+  return sessions.values();
 }
 
 export function findSessionByMandate(mandateId: string): Session | undefined {

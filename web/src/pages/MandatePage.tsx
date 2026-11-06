@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { CATEGORY_VOCAB, type Mandate, type Purchase, type Recipient, type RecipientStatus } from "../../../shared/types";
 import { api, isFixture } from "../api";
-import { DecideButtons } from "../components/cards";
+import { DecideButtons, ShipmentLine } from "../components/cards";
 import { Icon } from "../components/Icon";
 import { StatusPill } from "../components/MandateMeter";
 import { dateInputToIso, dateOnly, isoToDateInput, money } from "../format";
@@ -469,6 +469,11 @@ function Envelopes({ people, purchases, live }: { people: RecipientStatus[]; pur
                   </>
                 ) : (
                   <span className="muted small">No gift yet</span>
+                )}
+                {shown?.status === "charged" && shown.shipment && (
+                  <div className="env-ship">
+                    <ShipmentLine shipment={shown.shipment} compact />
+                  </div>
                 )}
                 {live && shown?.status === "pending_approval" && (
                   <div className="env-decide">

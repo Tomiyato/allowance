@@ -254,6 +254,9 @@ interface GiftRow {
   note: string;
   reasons: string;
   capture: string | null;
+  /** Demo shipment tracking number registered with PayPal for the capture. */
+  tracking: string | null;
+  tracker: string | null;
   left: number;
 }
 
@@ -295,6 +298,8 @@ function giftRows(state: AppState): GiftRow[] {
       note: "",
       reasons: s === "blocked" || s === "waiting" ? (p?.reasons.join(" ") ?? "") : "",
       capture: p?.status === "charged" || p?.status === "refunded" ? p.paypal.capture_id : null,
+      tracking: p?.status === "charged" || p?.status === "refunded" ? (p.shipment?.tracking_number ?? null) : null,
+      tracker: p?.status === "charged" || p?.status === "refunded" ? (p.shipment?.tracker_id ?? null) : null,
       left: st.remaining,
     };
   });
@@ -322,6 +327,7 @@ function GiftListGrid({ state }: { state: AppState }) {
     const bought = rows.filter((r) => r.state === "bought").length;
     const waiting = rows.filter((r) => r.state === "waiting").length;
     const spent = round2(state.recipients.reduce((s, r) => s + r.spent, 0));
+    const shipped = rows.filter((r) => r.state === "bought" && r.tracking).length;
     return [
       {
         id: "total",
@@ -333,6 +339,8 @@ function GiftListGrid({ state }: { state: AppState }) {
         note: waiting ? `${waiting} waiting` : "",
         reasons: "",
         capture: null,
+        tracking: shipped ? `${shipped} shipped` : null,
+        tracker: null,
         left: round2(rows.reduce((s, r) => s + r.left, 0)),
       },
     ];
@@ -354,6 +362,14 @@ function GiftListGrid({ state }: { state: AppState }) {
       },
       { field: "state", headerName: "Status", width: 168, cellRenderer: GiftStateCell, tooltipValueGetter: (p) => p.data?.reasons || "" },
       { field: "capture", headerName: "PayPal capture", width: 184, cellClass: "mono-cell" },
+      {
+        field: "tracking",
+        headerName: "Tracking",
+        width: 160,
+        cellClass: (p) => (p.node.rowPinned ? "" : "mono-cell"),
+        headerTooltip: "Demo shipment registered with PayPal for the capture (carrier: Ribbon demo shipping)",
+        tooltipValueGetter: (p) => (p.data?.tracker ? `PayPal tracker ${p.data.tracker}` : ""),
+      },
       { field: "left", headerName: "Left", width: 96, type: "rightAligned", valueFormatter: giftMoney, cellClass: "strong-cell" },
     ],
     [narrow],
