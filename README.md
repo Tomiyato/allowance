@@ -5,7 +5,7 @@
 Ribbon is an AI agent for holiday gift shopping. You type your gift list once: who, how much each, what they like. You approve one PayPal authorization for the total. The agent then shops the whole list in one pass and buys a gift for every person, each inside that person's own envelope. Gifts above your "ask me first" amount wait for your yes. Code, not the model, enforces every envelope, and every step lands in an AG Grid ledger.
 
 - **Hosted demo:** https://allowance-cpp0.onrender.com (free tier: the first load after idle can take about a minute)
-- **Demo video (under 3 min):** TODO(video): YouTube link
+- **Demo video (under 3 min):** https://youtu.be/p16WywpQZj4
 - **Judges:** a 3-minute test path is in [docs/JUDGES.md](docs/JUDGES.md).
 
 Built for the PayPal AI Hackathon (Devpost). Categories: Agentic Commerce, PayPal + AI, Channel3, AG Grid, Render.
